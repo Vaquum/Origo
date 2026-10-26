@@ -267,95 +267,10 @@ def test_c2_checks_frozen_older_calendar_throughout_day(canonical_case: LawCase)
     assert predicate(later, 'C1')['status'] == 'NOT_DUE'
 
 
-@pytest.fixture()
-def captured_depth_minute(law_case: LawCase, monkeypatch: pytest.MonkeyPatch) -> tuple[str, datetime]:
-    from origo.workers import depth
-
-    retired = (depth.DEPTH20_LIVE_RECONCILIATION_SPEC, depth.DEPTH200_LIVE_RECONCILIATION_SPEC)
-    monkeypatch.setattr(depth, 'DEPTH_SPECS', retired)
-    monkeypatch.setattr(law, 'DEPTH_SPECS', retired)
-    monkeypatch.setattr(law, 'LAW_INVENTORY', (*law.LAW_INVENTORY, *(s.projection_table_name for s in retired)))
-    from origo.assets import create_binance_spot_depth200_1m_table_origo as projection
-    from origo.assets import create_binance_spot_depth200_snapshots_table_origo as raw
-    from origo.assets import refresh_binance_spot_depth200_1m_origo as refresh
-    from origo.assets import sync_binance_spot_depth200_snapshots_to_origo as sync
-
-    settings = get_clickhouse_settings()
-    raw._create_snapshots_table(law_case.client, settings)
-    projection._create_depth200_1m_table(law_case.client, settings)
-    captured = Path(__file__).resolve().parents[1] / 'fixtures/binance/spot/depth200/history'
-    rows = [sync._parse_snapshot_line(line) for line in captured.read_text().splitlines() if line.strip()]
-    law_case.client.execute(f'INSERT INTO origo.{raw.SNAPSHOTS_TABLE_NAME} VALUES', rows)
-    minute = rows[0][0].replace(tzinfo=UTC, second=0, microsecond=0)
-    assert refresh.refresh_minute(law_case.client, 'origo', minute) == 1
-    return projection.DEPTH200_1M_TABLE_NAME, minute
 
 
-def test_depth_counts_distinct_closed_slots(
-    law_case: LawCase, captured_depth_minute: tuple[str, datetime], monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from origo.law_catalog import build_catalog, gate_evaluation
-
-    source, minute = captured_depth_minute
-    due = minute + timedelta(minutes=1, seconds=law.D1_DELIVERY_GRACE_SECONDS)
-    law_case.client.execute(f'INSERT INTO origo.{source} SELECT * FROM origo.{source}')
-    report = law_case.report(due)
-    assert predicate(report, 'D1', source)['evidence']['missing_slots'] == 1439
-    assert predicate(law_case.report(due - timedelta(microseconds=1)), 'D1', source)['evidence']['missing_slots'] == 1440
-    # Exercise the tolerance boundary using a smaller test window over the same real minute.
-    monkeypatch.setattr(law, 'D1_EXPECTED_SLOTS', 3)
-    before = law_case.report(due)
-    before_catalog = build_catalog('')
-    assert predicate(before, 'D1', source)['status'] == 'PASS'
-    assert predicate(law_case.report(due + timedelta(minutes=3)), 'D1', source)['status'] == 'FAIL'
-    assert predicate(before, 'D1', source)['evidence']['max_missing'] == 2
-    monkeypatch.setattr(law, 'D1_MAX_MISSING_SLOTS', 3)
-    after = law_case.report(due + timedelta(minutes=1))
-    assert predicate(after, 'D1', source)['evidence']['max_missing'] == 3
-    from origo.workers import law_page as page
-
-    for record, catalog in ((before, before_catalog), (after, build_catalog(''))):
-        record['catalog_version'] = catalog['version']
-        descriptors = {gate['id']: gate for gate in catalog['gates']}
-        for feed in record['feeds']:
-            for name, result in feed['predicates'].items():
-                identity = f"law.{name}:{feed['source_key']}"
-                record['gates'].append(gate_evaluation(
-                    descriptors[identity], evidence_id=f"{identity}:{record['sampling_slot']}",
-                    evaluated_at=record['evaluation_start'],
-                    outcome='EXPECTED_WAIT' if result['status'] == 'NOT_DUE' else result['status'],
-                    evidence=result['evidence'], reason=result['reason'],
-                ))
-        record['gates'].append(gate_evaluation(
-            descriptors['law.inventory'], evidence_id=record['sampling_slot'] + ':inventory',
-            evaluated_at=record['evaluation_start'], outcome='PASS',
-            evidence={'live': len(record['inventory'])}, reason='all_live_sources_evaluated',
-        ))
-    briefs = [page._sample_brief(page._decode(json.dumps(record).encode())) for record in (before, after)]
-    assert all(brief['policy'] is not None for brief in briefs)
-    assert briefs[0]['policy'] != briefs[1]['policy']
-    # Protocol-only PASS envelopes test the window; actual incomplete-system reports remain FAIL.
-    assert before['status'] == after['status'] == 'FAIL'
-    window = page.consecutive_window([{**brief, 'status': 'PASS'} for brief in briefs], str(briefs[-1]['slot']))
-    assert len(window) == 1
 
 
-def test_depth_delivery_grace_excludes_inflight_slot_until_due(
-    law_case: LawCase, captured_depth_minute: tuple[str, datetime], monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    source, minute = captured_depth_minute
-    monkeypatch.setattr(law, 'D1_EXPECTED_SLOTS', 1)
-    monkeypatch.setattr(law, 'D1_MAX_MISSING_SLOTS', 0)
-    due = minute + timedelta(minutes=1, seconds=law.D1_DELIVERY_GRACE_SECONDS)
-    # The captured minute is present; the next closed minute has not been delivered.
-    for now in (due, due + timedelta(seconds=59, microseconds=999999)):
-        result = predicate(law_case.report(now), 'D1', source)
-        assert result['status'] == 'PASS' and result['evidence']['missing_slots'] == 0
-        assert result['evidence']['newest_minute'] == minute.isoformat()
-        assert result['evidence']['window_end'] == (minute + timedelta(minutes=1)).isoformat()
-        assert result['evidence']['delivery_grace_seconds'] == 60
-    result = predicate(law_case.report(due + timedelta(minutes=1)), 'D1', source)
-    assert result['status'] == 'FAIL' and result['evidence']['missing_slots'] == 1
 
 
 class RecordingClient:
@@ -376,11 +291,6 @@ class RecordingClient:
 
 def test_real_reader_queries_obey_cost_and_transport_bounds(law_case: LawCase,
                                                             monkeypatch: pytest.MonkeyPatch) -> None:
-    from origo.assets.create_binance_spot_depth20_1m_table_origo import _create_depth20_1m_table
-    from origo.assets.create_binance_spot_depth200_1m_table_origo import _create_depth200_1m_table
-
-    _create_depth20_1m_table(law_case.client, get_clickhouse_settings())
-    _create_depth200_1m_table(law_case.client, get_clickhouse_settings())
     law_case.minute(0)
     client = RecordingClient(law_case.client)
     started = time.monotonic()
@@ -535,18 +445,6 @@ def test_projection_status_requires_its_own_current_evidence(law_case: LawCase) 
     assert projections[f'{SOURCE}:time']['status'] == 'UNKNOWN'
 
 
-def test_new_depth_declaration_requires_explicit_law_coverage(
-    law_case: LawCase, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from origo.workers.depth import DEPTH20_LIVE_RECONCILIATION_SPEC
-
-    unsupported = replace(DEPTH20_LIVE_RECONCILIATION_SPEC, projection_table_name='new_depth_1m')
-    monkeypatch.setattr(law, 'DEPTH_SPECS', (*law.DEPTH_SPECS, unsupported))
-    report = law_case.report(START)
-    assert 'new_depth_1m' in report['inventory']
-    feed = next(feed for feed in report['feeds'] if feed['source_key'] == 'new_depth_1m')
-    assert feed['predicates']['inventory']['status'] == 'UNKNOWN'
-    assert report['status'] != 'PASS'
 
 
 def test_market_state_laws_report_missing_stale_and_complete_coverage(law_case: LawCase) -> None:

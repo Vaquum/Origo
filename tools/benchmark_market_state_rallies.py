@@ -34,7 +34,6 @@ from numpy.typing import NDArray
 from origo.sources.capacity import CAPACITY_RESERVE_BYTES
 from origo.sources.contracts import RolloutStage
 from origo.sources.registry import SOURCE_REGISTRY
-from origo.workers.depth import DEPTH_SPECS
 
 HOST: Final = 'root@37.27.112.167'
 SCHEMA_VERSION: Final = 1
@@ -54,7 +53,7 @@ SOURCE_FILES: Final = (
     'origo/sources/capacity.py',
     'origo/sources/contracts.py',
     'origo/sources/registry.py',
-    'origo/workers/depth.py',
+    'origo/sources/binance_top20.py',
     'tools/benchmark_market_state_rallies.py',
 )
 FEEDS: Final = (
@@ -62,8 +61,8 @@ FEEDS: Final = (
     ('provisional', 'binance_spot_aggtrades', 'binance_spot_aggtrades:mount'),
     ('provisional', 'binance_perp_aggtrades', 'binance_perp_aggtrades:mount'),
     ('provisional', 'binance_perp_trades', 'binance_perp_trades:mount'),
-    ('depth', 'depth20_snapshots', None),
-    ('depth', 'depth200_snapshots', None),
+    ('provisional', 'binance_spot_top20_v1', None),
+    ('provisional', 'binance_perp_top20_v1', None),
 )
 LIMITS: Final = {
     'server_seconds': 295,
@@ -244,8 +243,6 @@ def _required_heartbeats() -> list[str]:
         for spec in SOURCE_REGISTRY
         if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT
     } | {'market_state_api.heartbeat', 'perp_capture.heartbeat'}
-    if DEPTH_SPECS:
-        names.add('depth.heartbeat')
     return sorted(names)
 
 

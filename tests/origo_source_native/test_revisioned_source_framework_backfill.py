@@ -22,9 +22,8 @@ from dagster._core.remote_origin import RemoteRepositoryOrigin
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.sources import capacity
 from origo.sources.adapters import binance_daily
-from origo.sources.binance_perp_book import BINANCE_PERP_BOOK_SPEC
-from origo.sources.binance_spot_book import BINANCE_SPOT_BOOK_SPEC
 from origo.sources.binance_spot_trades import BINANCE_SPOT_TRADES_SPEC
+from origo.sources.binance_top20 import BINANCE_SPOT_TOP20_SPEC, BINANCE_PERP_TOP20_SPEC
 from origo.sources.bundle import build_source_bundle
 from origo.sources.contracts import RolloutStage, SourceBundle
 from origo.sources.lifecycle import SourceRuntime
@@ -615,7 +614,7 @@ def test_native_backfill_queue_bounds_parallel_canonical_runs(tmp_path: Path) ->
     from dagster._core.op_concurrency_limits_counter import GlobalOpConcurrencyLimitsCounter
     from dagster._core.remote_origin import RemoteJobOrigin
 
-    for spec in (BINANCE_SPOT_TRADES_SPEC, BINANCE_SPOT_BOOK_SPEC, BINANCE_PERP_BOOK_SPEC):
+    for spec in (BINANCE_SPOT_TRADES_SPEC, BINANCE_SPOT_TOP20_SPEC, BINANCE_PERP_TOP20_SPEC):
         for granularity in (PoolGranularity.RUN, PoolGranularity.OP):
             source = build_source_bundle(spec)
             job = next(
@@ -631,12 +630,12 @@ def test_native_backfill_queue_bounds_parallel_canonical_runs(tmp_path: Path) ->
             ) as instance:
                 first = instance.create_run_for_job(
                     job, status=DagsterRunStatus.STARTED,
-                    tags={'dagster/partition': DAY if spec.consumers else '2026-10-04'},
+                    tags={'dagster/partition': '2026-10-24T13Z' if spec.partitions.interval == 'hour' else DAY},
                 )
                 second = instance.create_run_for_job(
                     job,
                     status=DagsterRunStatus.QUEUED,
-                    tags={'dagster/partition': '2020-01-01' if spec.consumers else '2026-10-05'},
+                    tags={'dagster/partition': '2026-10-24T14Z' if spec.partitions.interval == 'hour' else '2020-01-01'},
                     remote_job_origin=RemoteJobOrigin(_repository_origin(), job.name),
                 )
                 pool = f'{spec.key}_canonical'

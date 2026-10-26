@@ -33,7 +33,6 @@ from origo.sources.adapters.binance_provisional import (
     PROVISIONAL_CATCHUP_LOOKBACK_HOURS,
     PROVISIONAL_CATCHUP_MINUTES,
 )
-from origo.sources.adapters.book_local import BOOK_CATCHUP_LOOKBACK_HOURS, LocalBookProvisional
 from origo.sources.adapters.render_book import RenderBookProvisional
 from origo.sources.capacity import CAPACITY_FREE_INODE_DENOMINATOR, CAPACITY_RESERVE_BYTES
 from origo.sources.contracts import RolloutStage, Row, SourceError
@@ -45,7 +44,6 @@ from origo.sources.dagit import (
 )
 from origo.sources.lifecycle import SourceRuntime
 from origo.sources.locking import source_lock
-from origo.workers.depth import DEPTH_SPECS
 from origo.workers.provisional import PROVISIONAL_MAX_WORKERS
 
 from .test_current_partition_recovery import real_minutes as real_minutes
@@ -64,9 +62,7 @@ def test_source_catalog_matches_all_authoritative_components_and_consumers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sources = {source['id']: source for source in catalog['sources']}
-    assert set(sources) == {spec.key for spec in registry.SOURCE_REGISTRY} | {
-        spec.projection_table_name for spec in DEPTH_SPECS
-    }
+    assert set(sources) == {spec.key for spec in registry.SOURCE_REGISTRY}
     for spec in registry.SOURCE_REGISTRY:
         source = sources[spec.key]
         assert source['rollout_stage'] == spec.rollout_stage.value
@@ -84,13 +80,6 @@ def test_source_catalog_matches_all_authoritative_components_and_consumers(
             nodes[f'{spec.key}:consumer:{item.key}']['lane'] == 'consumer'
             for item in spec.consumers
         )
-    for spec in DEPTH_SPECS:
-        nodes = sources[spec.projection_table_name]['projections']
-        assert {node['name'] for node in nodes} == {
-            spec.snapshot_table_name,
-            spec.projection_table_name,
-            spec.series,
-        }
     # Declaration-only mutation verifies owner derivation; no market observations are invented.
     spec = registry.SOURCE_REGISTRY[0]
     added = replace(spec.components[0], key='catalog_probe')
@@ -133,11 +122,7 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
         assert not gate['id'].startswith(('ci.', 'merge.'))
     for spec in registry.SOURCE_REGISTRY:
         key = spec.key
-        if isinstance(spec.provisional, LocalBookProvisional):
-            assert gates[f'worker.minute_admission.catchup:{key}']['thresholds'] == {
-                'lookback_hours': BOOK_CATCHUP_LOOKBACK_HOURS,
-            }
-        elif isinstance(spec.provisional, RenderBookProvisional):
+        if isinstance(spec.provisional, RenderBookProvisional):
             assert gates[f'worker.minute_admission.catchup:{key}']['thresholds'] == {'lookback_hours': 48}
         else:
             assert gates[f'worker.minute_admission.catchup:{key}']['thresholds'] == {
@@ -168,12 +153,7 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             'partitions': HEALTH_RECONCILIATION_BATCH_SIZE,
         }
         assert spec.provisional is not None
-        if isinstance(spec.provisional, LocalBookProvisional):
-            assert gates[f'book.capture.seed_budget:{key}']['thresholds'] == {'attempts_per_hour': 3}
-            assert gates[f'book.capture.connection_budget:{key}']['thresholds'] == {'attempts_per_five_minutes': 5}
-            assert f'provider.response_completeness.page_cap:{key}' not in gates
-            assert f'book.capture.hourly_grid:{key}' not in gates
-        elif isinstance(spec.provisional, RenderBookProvisional):
+        if isinstance(spec.provisional, RenderBookProvisional):
             assert gates[f'book.capture.sample_grid:{key}']['thresholds'] == {
                 'depth20_samples': 60, 'canonical_seconds': 3600,
             }
@@ -191,9 +171,7 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             == spec.orchestration.retry_count
         )
     for spec in registry.SOURCE_REGISTRY:
-        if isinstance(spec.provisional, LocalBookProvisional):
-            provider_families = ('book.capture.sealed_payload', 'book.capture.sample_grid')
-        elif isinstance(spec.provisional, RenderBookProvisional):
+        if isinstance(spec.provisional, RenderBookProvisional):
             provider_families = ('book.capture.segment_integrity', 'book.capture.sample_grid',
                                  'book.capture.hour_pin', 'book.capture.cache_bound')
         else:
@@ -214,13 +192,6 @@ def test_gate_catalog_has_owner_bound_meaning_thresholds_and_code(catalog: LawCa
             assert 'unresolved partition failure' in ready['condition']
     location = gates['orchestration.admission.redundant_launch']['code']
     assert location is not None and location['path'] == 'origo/orchestration/launcher.py'
-    for spec in DEPTH_SPECS:
-        from origo.law import D1_DELIVERY_GRACE_SECONDS
-
-        assert (
-            gates[f'law.D1:{spec.projection_table_name}']['thresholds']['delivery_grace_seconds']
-            == D1_DELIVERY_GRACE_SECONDS
-        )
     assert gates['orchestration.admission.global']['thresholds']['limit'] == 40
     assert len([key for key in gates if key.startswith('orchestration.admission.tag:')]) == 6
     assert build_catalog(SHA)['version'] == catalog['version']

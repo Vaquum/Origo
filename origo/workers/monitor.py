@@ -7,7 +7,7 @@ Every minute the tick evaluates seven checks on the ``origo_monitor`` asset:
 - ``queue_bounded``: fewer queued runs than the threshold, and no run failure or failed
   asset check since the last tick;
 - ``workers_alive``: every worker heartbeat is fresh and no worker receipt failed;
-- ``collectors_serving``: each depth collector returns rows for the last completed minute;
+- ``collectors_serving``: raw-perp capture and both Render replicas report fresh durable acquisition;
 - ``no_error_logs``: the container log holds no ``ERROR`` row since the last tick;
 - ``publication_current``: every public consumer publishes the current source state;
 - ``data_current``: the reader law and its evidence/page are current.
@@ -30,7 +30,6 @@ import os
 import signal
 import sys
 import time
-import urllib.error
 import urllib.request
 import zlib
 from collections import OrderedDict
@@ -57,10 +56,6 @@ from origo.alerts.summary import (
     validate_delivery_receipt,
     validate_lost_intervals,
     validate_pending,
-)
-from origo.assets.build_depth_snapshot_store_arrow import (
-    depth_snapshot_chunk_relative_path,
-    minute_start_from_partition_key,
 )
 from origo.assets.create_origo_database import (
     ClickHouseSettings,
@@ -110,7 +105,6 @@ from origo.observatory import (
 from origo.observatory import (
     sample_brief as _sample_brief,
 )
-from origo.sources.adapters.book_spool import BOOK_SPOOL_MAX_BYTES, object_mapping
 from origo.sources.adapters.render_book import REPLICAS, RenderBookEndpoint
 from origo.sources.contracts import Client, RolloutStage, SourceError, identifier
 from origo.sources.profiles.top20_arrow import (
@@ -122,9 +116,7 @@ from origo.sources.profiles.top20_arrow import (
 from origo.sources.publication import file_sha256_matches
 from origo.sources.registry import SOURCE_REGISTRY
 
-from .book_capture import BOOK_MAX_EVENT_AGE_SECONDS, STATUS_MAX_BYTES, status_path
 from .dagster_reader import DagsterReader, RunFailure
-from .depth import DEPTH_SPECS, DepthFeed
 from .receipts import ensure_monitoring_tables, error_log_rows_since, failed_receipts_since
 from .report import Reporter
 from .runtime import (
@@ -192,11 +184,6 @@ class Finding:
     detail: str
 
 
-@dataclass(frozen=True)
-class CollectorProbe:
-    name: str
-    base_url_env: str
-    auth_token_env: str
 
 
 @dataclass
@@ -318,24 +305,18 @@ class Cursor:
             os.close(directory)
 
 
+def object_mapping(value: object) -> Mapping[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError('Monitor evidence must be an object.')
+    return cast(dict[str, object], value)
+
+
 def _utc(value: object) -> datetime:
     if not isinstance(value, datetime):
         raise TypeError(f'Expected a datetime, got {type(value).__name__}.')
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def probe_collector(probe: CollectorProbe, minute: datetime) -> bool:
-    """Whether the collector's history endpoint returns rows for ``minute``."""
-    base_url = os.environ[probe.base_url_env].rstrip('/')
-    token = os.environ[probe.auth_token_env]
-    unix_seconds = int(minute.timestamp())
-    request = urllib.request.Request(
-        f'{base_url}/history?from={unix_seconds}&to={unix_seconds}',
-        headers={'Accept': 'application/json', 'Authorization': f'Bearer {token}'},
-    )
-    with urllib.request.urlopen(request, timeout=PROBE_TIMEOUT_SECONDS) as response:
-        body = response.read().decode('utf-8', 'replace')
-    return any(line.strip() for line in body.splitlines())
 
 
 class LawClient:
@@ -756,7 +737,6 @@ class Monitor:
         client: Client,
         database: str,
         heartbeat_dir: Path,
-        probes: Sequence[CollectorProbe],
         settings: AlertSettings | None,
         reporter: Reporter,
         cursor_path: Path,
@@ -784,7 +764,6 @@ class Monitor:
         self.database = database
         self.heartbeat_dir = heartbeat_dir
         self.heartbeat_inventory: set[Path] = set()
-        self.probes = tuple(probes)
         self.settings = settings
         self.reporter = reporter
         self.cursor_path = cursor_path
@@ -1146,7 +1125,6 @@ class Monitor:
     def _output_observations(self, report: LawReport, now: datetime) -> list[ProjectionObservation]:
         deadline = time.monotonic() + 5
         observations: list[ProjectionObservation] = []
-        feeds = {item['source_key']: item for item in report['feeds']}
         if self.catalog is None:
             raise ValueError('Output observations require a catalog')
         observations.extend(
@@ -1159,80 +1137,6 @@ class Monitor:
                 deadline=deadline,
             )
         )
-        for spec in DEPTH_SPECS:
-            source = spec.run_key_prefix + '_1m'
-            feed = feeds.get(source)
-            predicate = feed['predicates'].get('D1') if feed else None
-            newest = predicate['evidence'].get('newest_minute') if predicate else None
-            if newest is not None:
-                minute = datetime.fromisoformat(str(newest))
-                fresh = now - (minute + timedelta(minutes=1)) <= timedelta(minutes=2)
-                observations.append(
-                    {
-                        'id': f'{source}:minute',
-                        'status': 'CURRENT' if fresh else 'STALE',
-                        'observed_at': now.isoformat(),
-                        'evidence_at': now.isoformat(),
-                        'evidence_id': f'{source}:{minute.isoformat()}',
-                        'data_through': (minute + timedelta(minutes=1)).isoformat(),
-                        'reason': 'depth_store_rows',
-                        'gate_ids': [f'law.D1:{source}'],
-                        'dagit_url': None,
-                    }
-                )
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError('output observation budget exhausted')
-                rows = self.law_client.execute(
-                    f'SELECT count() FROM {identifier(self.database)}.{identifier(spec.snapshot_table_name)} '
-                    'WHERE datetime >= %(start)s AND datetime < %(end)s',
-                    {
-                        'start': minute,
-                        'end': minute + timedelta(minutes=1),
-                    },
-                    settings={**LAW_QUERY_SETTINGS, 'max_execution_time': min(5, remaining)},
-                )
-                count = int(str(rows[0][0]))
-                observations.append(
-                    {
-                        'id': f'{source}:raw',
-                        'status': ('CURRENT' if fresh else 'STALE') if count else 'FAILED',
-                        'observed_at': now.isoformat(),
-                        'evidence_at': now.isoformat(),
-                        'evidence_id': f'{spec.snapshot_table_name}:{minute.isoformat()}:{count}',
-                        'data_through': (minute + timedelta(minutes=1)).isoformat()
-                        if count
-                        else None,
-                        'reason': 'depth_raw_rows' if count else 'depth_raw_missing',
-                        'gate_ids': [],
-                        'dagit_url': None,
-                    }
-                )
-            path = self.arrow_root / spec.series / 'latest.json'
-            if path.is_file():
-                data = self._manifest(path)
-                minute = minute_start_from_partition_key(str(data['source_partition_key']))
-                chunk = path.parent / depth_snapshot_chunk_relative_path(minute)
-                through = minute + timedelta(minutes=1)
-                observations.append(
-                    {
-                        'id': f'{source}:consumer:arrow',
-                        'status': ('CURRENT' if now - through <= timedelta(minutes=2) else 'STALE')
-                        if chunk.is_file()
-                        else 'FAILED',
-                        'observed_at': now.isoformat(),
-                        'evidence_at': datetime.fromtimestamp(
-                            int(str(data['updated_at_unix_ns'])) / 1e9, UTC
-                        ).isoformat(),
-                        'evidence_id': str(data['version']),
-                        'data_through': through.isoformat(),
-                        'reason': 'arrow_manifest_and_chunk'
-                        if chunk.is_file()
-                        else 'arrow_chunk_missing',
-                        'gate_ids': [],
-                        'dagit_url': None,
-                    }
-                )
         if time.monotonic() > deadline:
             raise TimeoutError('output observation budget exhausted')
         return observations
@@ -1618,12 +1522,7 @@ class Monitor:
             for spec in SOURCE_REGISTRY
             if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT
         } | {heartbeat_path(self.heartbeat_dir, MARKET_STATE_API_FEED),
-             heartbeat_path(self.heartbeat_dir, PERP_CAPTURE_FEED)} | {
-            heartbeat_path(self.heartbeat_dir, f'book_capture_{market}')
-            for market in ('spot', 'perp')
-            if any(spec.key == f'binance_{market}_book' and spec.rollout_stage != RolloutStage.DORMANT
-                   for spec in SOURCE_REGISTRY)
-        }
+             heartbeat_path(self.heartbeat_dir, PERP_CAPTURE_FEED)}
         self.heartbeat_inventory = set(self.heartbeat_dir.glob('*.heartbeat')) - ignored
         if os.environ.get('ORIGO_TRADE_MAINTENANCE', '0') == '1':
             expected |= {
@@ -1661,8 +1560,6 @@ class Monitor:
             self.client, self.database, datetime.fromisoformat(cursor.receipts_after), window_end
         )
         members = set(heartbeats)
-        if DEPTH_SPECS:
-            members.add(heartbeat_path(self.heartbeat_dir, DepthFeed.name))
         unknown = len(members - self.heartbeat_inventory)
         self.tick_evidence['workers_alive'] = {
             'workers_fresh': fresh, 'workers_expected': len(members),
@@ -1728,91 +1625,14 @@ class Monitor:
             )
         return None
 
-    def _book_capture_findings(self, now: datetime) -> list[Finding]:
-        findings: list[Finding] = []
-        self.book_evidence = {}
-        for market in ('spot', 'perp'):
-            if not any(spec.key == f'binance_{market}_book' and spec.rollout_stage != RolloutStage.DORMANT
-                       for spec in SOURCE_REGISTRY):
-                continue
-            key = f'collector_book:{market}'
-            evidence: dict[str, int | float | None] = {}
-            self.book_evidence[key] = evidence
-            try:
-                with status_path(self.heartbeat_dir, market).open('rb') as stream:
-                    raw = stream.read(STATUS_MAX_BYTES + 1)
-                if len(raw) > STATUS_MAX_BYTES:
-                    raise ValueError('Book capture status exceeds 16 KiB')
-                status = object_mapping(json.loads(raw))
-                if status.get('schema_version') != 1 or status.get('market') != market:
-                    raise ValueError('Book capture status identity is invalid')
-                for field, maximum in (('committed_at', HEARTBEAT_MAX_AGE_SECONDS),
-                                       ('last_event_at', BOOK_MAX_EVENT_AGE_SECONDS),
-                                       ('last_received_at', BOOK_MAX_EVENT_AGE_SECONDS),
-                                       ('last_seal_at', HEARTBEAT_MAX_AGE_SECONDS)):
-                    stamp = status.get(field)
-                    if not isinstance(stamp, str):
-                        raise ValueError(f'Book capture has no {field}')
-                    instant = datetime.fromisoformat(stamp)
-                    if instant.utcoffset() != timedelta(0):
-                        raise ValueError(f'Book capture {field} is not UTC')
-                    age = (now - instant).total_seconds()
-                    evidence[field.removesuffix('_at') + '_age_seconds'] = age
-                    if not 0 <= age <= maximum:
-                        raise ValueError(f'Book capture {field} is stale or in the future')
-                used = status.get('spool_bytes')
-                if type(used) is not int or not 0 <= used < BOOK_SPOOL_MAX_BYTES:
-                    raise ValueError('Book spool capacity reached or invalid')
-                evidence['spool_bytes'] = used
-                attempts = object_mapping(status.get('attempts'))
-                for field in ('seed_total', 'seed_weight', 'connection_total'):
-                    value = attempts.get(field)
-                    if type(value) is not int or value < 0:
-                        raise ValueError(f'Book capture {field} is invalid')
-                    evidence[field] = value
-                if status.get('book_verified') is not True or status.get('error_code') is not None:
-                    raise ValueError(f"Book capture paused: {status.get('error_code')}")
-            except (OSError, ValueError, TypeError) as error:
-                findings.append(Finding(key, 'collectors_serving', f'{market} book capture unavailable',
-                                        f'{type(error).__name__}: {error}'[:300]))
-            self.condition_states[key] = ('collectors_serving', f'{market} book capture',
-                                          not any(finding.key == key for finding in findings))
-        return findings
 
     def _collector_findings(self, minute: datetime) -> list[Finding]:
-        findings: list[Finding] = []
-        for probe in self.probes:
-            try:
-                serving = probe_collector(probe, minute)
-            except (
-                urllib.error.URLError,
-                http.client.HTTPException,
-                TimeoutError,
-                OSError,
-                KeyError,
-                ValueError,
-            ) as error:
-                serving = False
-                reason = f'{type(error).__name__}: {error}'
-            else:
-                reason = 'no rows for the last completed minute'
-            self.condition_states[f'collector_silent:{probe.name}'] = ('collectors_serving', probe.name, serving)
-            if not serving:
-                findings.append(
-                    Finding(
-                        f'collector_silent:{probe.name}',
-                        'collectors_serving',
-                        f'Collector {probe.name} not serving',
-                        f'{reason} ({minute.isoformat()}).',
-                    )
-                )
+        self.book_evidence = {}
         capture = self._capture_finding(minute + timedelta(minutes=1))
         self.condition_states['collector_capture'] = ('collectors_serving', 'Raw-perp capture', capture is None)
-        if capture is not None:
-            findings.append(capture)
-        findings.extend(self._book_capture_findings(datetime.now(UTC)))
+        findings = [] if capture is None else [capture]
         findings.extend(self._render_book_findings(datetime.now(UTC)))
-        expected = len(self.probes) + 1 + len(self.book_evidence)
+        expected = 1 + len(self.book_evidence)
         self.tick_evidence['collectors_serving'] = {
             'collectors_serving': expected - len(findings),
             'collectors_expected': expected,
@@ -1911,7 +1731,6 @@ class Monitor:
                 *((f'{spec.key}:consumer:{consumer.key}',
                    consumer.public and spec.rollout_stage != RolloutStage.DORMANT)
                   for spec in SOURCE_REGISTRY for consumer in spec.consumers),
-                *((f'{spec.projection_table_name}:consumer:arrow', False) for spec in DEPTH_SPECS),
             ]
         }
         policies = {key: value.copy() for key, value in self.publication_policy.items()}
@@ -2009,7 +1828,6 @@ def build_monitor(environ: dict[str, str]) -> Monitor:
     client = make_clickhouse_client(settings)
     ensure_monitoring_tables(client, settings.database)
     heartbeat_dir = heartbeat_directory()
-    probes: tuple[CollectorProbe, ...] = ()
     alert_settings = AlertSettings.from_environment(environ)
     if alert_settings is None:
         log.warning('alerts disabled: ORIGO_ALERT_* is not set; findings are logged only')
@@ -2023,7 +1841,6 @@ def build_monitor(environ: dict[str, str]) -> Monitor:
         page_url=environ.get('ORIGO_LAW_PAGE_URL', 'http://law:8484/law.json'),
         database=settings.database,
         heartbeat_dir=heartbeat_dir,
-        probes=probes,
         settings=alert_settings,
         reporter=Reporter(base_url),
         cursor_path=heartbeat_dir / 'monitor.cursor.json',

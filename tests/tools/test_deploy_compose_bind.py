@@ -160,204 +160,81 @@ def test_only_provisional_workers_select_a_source_and_compute_their_heartbeat() 
             assert compose.count('command: python -m origo.workers.provisional --role repair') == 1
 
 
-def test_render_book_rollback_preserves_unrelated_workers_and_refuses_incomplete_retirement(tmp_path: Path) -> None:
+def test_render_book_deployment_preserves_workers_and_frozen_history(tmp_path: Path) -> None:
     import importlib.util
     import json
-    import os
     import subprocess
 
     import pytest
 
-    script = REPO_ROOT / 'deploy/retire_render_top20_workers.sh'
-    docker = r'''
-set -euo pipefail
-function docker() {
-    printf '%s\n' "$*" >> "$TRACE"
-    case "$*" in
-      'ps -q --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=dagster')
-        printf 'controller\n' ;;
-      'exec -i controller python -')
-        cat > "$STATE/admission.py"
-        if [ "$FAULT" = active ]; then return 1; fi
-        if [ "$FAULT" = drain ] && [[ $(< "$STATE/admission.py") == *book_root* ]]; then return 1; fi ;;
-      'ps -aq --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=monitor'|'ps -q --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service=monitor')
-        printf 'monitor\n' ;;
-      'ps -aq --filter label=com.docker.compose.project=test --filter label=com.docker.compose.service='*)
-        service="${@: -1}"
-        service="${service##*=}"
-        if [ ! -e "$STATE/$service" ] || [ "$FAULT" = remains ]; then printf '%s\n' "$service"; fi ;;
-      'stop '*)
-        if [ "$FAULT" = stop ]; then return 1; fi ;;
-      'rm '*)
-        if [ "$FAULT" = remove ]; then return 1; fi
-        touch "$STATE/${@: -1}" ;;
-      'volume ls -q --filter label=com.docker.compose.project=test --filter label=com.docker.compose.volume=worker-heartbeats')
-        printf 'test-heartbeats\n' ;;
-      'inspect --format {{.Image}} monitor') printf 'source-aware-image\n' ;;
-      'run --rm --pull=never --network none --mount type=volume,source=test-heartbeats,target=/heartbeats --entrypoint rm source-aware-image -f '*) ;;
-      *) printf 'Unexpected Docker call: %s\n' "$*" >&2; return 2 ;;
-    esac
-}
-'''
-    for script, services, heartbeats in (
-        (script, {'provisional-binance-spot-top20', 'provisional-binance-perp-top20'},
-         {'provisional_binance_spot_top20_v1.heartbeat', 'provisional_binance_perp_top20_v1.heartbeat'}),
-        (REPO_ROOT / 'deploy/retire_legacy_book_workers.sh',
-         {'depth-worker', 'book-capture-spot', 'book-capture-perp', 'provisional-binance-spot-book', 'provisional-binance-perp-book'},
-         {'depth.heartbeat', 'book_capture_spot.heartbeat', 'book_capture_perp.heartbeat',
-          'provisional_binance_spot_book.heartbeat', 'provisional_binance_perp_book.heartbeat'}),
-    ):
-        for fault in (('none', 'active', 'stop', 'remove', 'remains', 'drain')
-                      if script.name == 'retire_legacy_book_workers.sh' else ('none', 'active', 'stop', 'remove', 'remains')):
-            state = tmp_path / (script.stem + '-' + fault)
-            state.mkdir()
-            trace = state / 'trace'
-            result = subprocess.run(
-                ['bash', '-c', docker + '\nsource "$SCRIPT"'],
-                env={**os.environ, 'PROJECT_NAME': 'test', 'FAULT': fault, 'STATE': str(state),
-                     'TRACE': str(trace), 'SCRIPT': str(script)},
-                capture_output=True, text=True, timeout=10,
-            )
-            calls = trace.read_text().splitlines()
-            assert (result.returncode == 0) is (fault == 'none'), result.stderr
-            wipes = [call for call in calls if call.startswith('run ')]
-            assert bool(wipes) is (fault == 'none')
-            assert all(call.split()[1] in services for call in calls if call.startswith(('stop ', 'rm ')))
-            if fault == 'none':
-                assert {call.split()[1] for call in calls if call.startswith('rm ')} == services
-                assert {Path(word).name for word in wipes[0].split() if word.startswith('/heartbeats/')} == heartbeats
-            if fault == 'active':
-                assert not any(call.startswith(('stop ', 'rm ')) for call in calls)
-            if fault == 'drain':
-                assert {call.split()[1] for call in calls if call.startswith('stop ')} == {'book-capture-spot', 'book-capture-perp'}
-            if fault == 'none' and script.name == 'retire_legacy_book_workers.sh':
-                stopped = [call.split()[1] for call in calls if call.startswith('stop ')]
-                assert stopped[:2] == ['book-capture-spot', 'book-capture-perp']
-                assert stopped[-1] == 'depth-worker'
-
-    specification = importlib.util.spec_from_file_location('render_top20_deploy', REPO_ROOT / 'deploy/render_top20_deploy.py')
+    script = REPO_ROOT / 'deploy/render_top20_deploy.py'
+    specification = importlib.util.spec_from_file_location('render_top20_deploy', script)
     assert specification is not None and specification.loader is not None
     guard = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(guard)
-    root = tmp_path / 'deployment'
-    root.mkdir()
-    compose = root / 'docker-compose.deploy.yml'
-    compose.write_text('services:\n  dagster:\n    image: ${APP_IMAGE}\n'
-                       '    environment:\n      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}\n'
-                       '  monitor:\n    image: ${APP_IMAGE}\n'
-                       '    environment:\n      ORIGO_ALERT_RESEND_API_KEY: ${RESEND_API_KEY:?required}\n')
-    # Named process/frontier controls exercise deployment faults; they claim no market observations.
-    members = {name: {'service': name, 'id': name, 'restarts': 0, 'started': 'original-start',
-                      'running': True, 'image': 'floor', 'image_id': 'pinned-floor', 'hostname': name}
-               for name in guard.PROTECTED | set(guard.CONTROLLERS)}
-    source = {'frontiers': {'existing_control': '2026-10-24 13:00:00'},
-              'stages': ['DORMANT', 'DORMANT']}
-    calls: list[tuple[str, ...]] = []
+    # Deliberate process/frontier metadata faults; no market records are invented.
+    members = {name: {'service': name, 'id': name, 'restarts': 0, 'started': 'original',
+                      'running': True, 'image': 'retained', 'image_id': 'retained', 'hostname': name}
+               for name in guard.PROTECTED | set(guard.CONTROLLERS) | guard.RENDER_WORKERS}
+    state = {'frontiers': {'binance_spot_top20_v1': '2026-10-26 21:00:00',
+                           'binance_spot_book': '2026-10-26 20:53:00'},
+             'stages': ['LIVE', 'LIVE']}
 
     def command(*arguments: str, source: str | None = None,
                 environment: dict[str, str] | None = None) -> str:
-        calls.append(arguments)
         if arguments[:3] == ('docker', 'ps', '-aq'):
             return '\n'.join(members)
         if arguments[:2] == ('docker', 'inspect'):
-            return '\n'.join(json.dumps(row) for row in members.values())
-        if arguments[:2] == ('docker', 'exec'):
-            if 'source_active_partitions' in source:
-                return json.dumps(state)
-            values = {'CLICKHOUSE_PASSWORD': 'controller-value' if arguments[3] in guard.CONTROLLERS else 'retained-worker-value'}
-            if arguments[3] == 'monitor':
-                assert 'ORIGO_ALERT_RESEND_API_KEY' in source
-                values['ORIGO_ALERT_RESEND_API_KEY'] = 'alert-value'
-            return json.dumps(values)
-        if arguments[0] == 'bash':
-            assert environment['PROJECT_NAME'] == 'test'
-            for name in guard.CONTROLLERS:
-                members[name]['id'] += '-restored'
-            state['stages'] = ['DORMANT', 'DORMANT']
-            return ''
-        assert arguments[:2] in (('docker', 'image'), ('docker', 'compose'))
-        if 'config' in arguments:
-            assert environment['RESEND_API_KEY'] == 'alert-value'
-        return ''
+            return '\n'.join(json.dumps(item) for item in members.values())
+        assert arguments[:2] == ('docker', 'exec') and 'source_active_partitions' in source
+        return json.dumps(state)
 
-    state = source
     guard.run = command
-    guard.main('capture', root, 'test')
-    floor = root / '.render-top20-floor'
-    pinned = (floor / 'docker-compose.deploy.yml').read_bytes()
-    assert (floor / 'environment.json').stat().st_mode & 0o777 == 0o600
-    assert json.loads((floor / 'environment.json').read_text())['CLICKHOUSE_PASSWORD'] == 'controller-value'
-    compose.write_text('active replacement Compose')
-    guard.main('check', root, 'test')
-    assert (floor / 'docker-compose.deploy.yml').read_bytes() == pinned
-    for key, invalid in (('id', 'replaced'), ('restarts', 1), ('started', 'restarted'), ('running', False)):
-        original = members['depth-worker'][key]
-        members['depth-worker'][key] = invalid
-        with pytest.raises(RuntimeError):
-            guard.main('check', root, 'test')
-        members['depth-worker'][key] = original
-    missing = members.pop('depth-worker')
-    with pytest.raises(RuntimeError, match='membership'):
-        guard.main('capture', root, 'test')
-    members['depth-worker'] = missing
-    state['frontiers']['existing_control'] = '2026-10-24 12:59:00'
-    with pytest.raises(RuntimeError, match='regressed'):
-        guard.main('check', root, 'test')
-    state['frontiers']['existing_control'] = '2026-10-24 13:00:00'
-    with pytest.raises(RuntimeError, match='did not advance'):
-        guard.main('verify', root, 'test')
-    state['frontiers']['existing_control'] = '2026-10-24 13:01:00'
-    guard.main('verify', root, 'test')
-    for name in ('docker-compose.deploy.yml', 'environment.json'):
-        path = floor / name
-        original = path.read_bytes()
-        path.write_bytes(original + b'x')
-        calls.clear()
-        with pytest.raises(RuntimeError, match='Pinned book rollback input changed'):
-            guard.main('rollback', root, 'test')
-        assert not any(call[0] == 'bash' for call in calls)
-        path.write_bytes(original)
     for _ in range(2):
-        state['stages'] = ['LIVE', 'LIVE']
-        calls.clear()
-        guard.main('rollback', root, 'test')
-        assert any(call[0] == 'bash' for call in calls)
-        restores = [call for call in calls if 'up' in call]
-        assert len(restores) == 1 and restores[0][-4:] == guard.CONTROLLERS
-        assert str(floor / 'docker-compose.deploy.yml') in restores[0]
-        assert restores[0][restores[0].index('--project-directory') + 1] == str(root)
+        guard.main('capture', tmp_path, 'test')
+        snapshot = json.loads((tmp_path / '.render-top20-before.json').read_text())
+        assert set(snapshot['containers']) == guard.PROTECTED | guard.RENDER_WORKERS
+        for service in guard.PROTECTED | guard.RENDER_WORKERS:
+            for key, invalid in (('id', 'replaced'), ('restarts', 1), ('started', 'restarted')):
+                before = members[service][key]
+                members[service][key] = invalid
+                with pytest.raises(RuntimeError, match='protected worker'):
+                    guard.main('check', tmp_path, 'test')
+                members[service][key] = before
+        for service in guard.RETIRED:
+            members[service] = dict(members['dagit'], service=service)
+            with pytest.raises(RuntimeError, match='retired book worker reappeared'):
+                guard.main('check', tmp_path, 'test')
+            del members[service]
+        absent = members.pop('provisional-binance-spot-top20')
+        with pytest.raises(RuntimeError, match='membership'):
+            guard.main('capture', tmp_path, 'test')
+        members['provisional-binance-spot-top20'] = absent
+        guard.main('check', tmp_path, 'test')
+        with pytest.raises(RuntimeError, match='did not advance'):
+            guard.main('verify', tmp_path, 'test')
+        from datetime import datetime, timedelta
 
-    state['stages'] = ['LIVE', 'LIVE']
-    state['legacy_stages'] = ['DORMANT', 'DORMANT']
-    state['frontiers']['binance_spot_book'] = '2026-10-24 13:00:00'
-    for service in guard.RENDER_WORKERS:
-        members[service] = dict(members['provisional-worker'], service=service, id=service)
-    for service in guard.RETIRED:
-        del members[service]
-    guard.main('capture', root, 'test')
-    retained = json.loads((root / '.render-top20-before.json').read_text())['containers']
-    assert set(retained) == (guard.PROTECTED - guard.RETIRED) | guard.RENDER_WORKERS
-    state['frontiers']['binance_spot_book'] = '2026-10-24 12:59:00'
-    with pytest.raises(RuntimeError, match='regressed'):
-        guard.main('check', root, 'test')
-    state['frontiers']['binance_spot_book'] = '2026-10-24 13:00:00'
-    for service in guard.RENDER_WORKERS:
-        for key, invalid in (('id', 'replaced'), ('restarts', 1), ('started', 'restarted')):
-            original = members[service][key]
-            members[service][key] = invalid
-            with pytest.raises(RuntimeError, match='protected worker'):
-                guard.main('check', root, 'test')
-            members[service][key] = original
-        missing = members.pop(service)
-        with pytest.raises(RuntimeError, match='must remain running'):
-            guard.main('capture', root, 'test')
-        members[service] = missing
-    guard.main('check', root, 'test')
-    (root / '.book-reader-cutover.json').write_text('{}')
-    calls.clear()
-    with pytest.raises(RuntimeError, match='readers have switched'):
-        guard.main('rollback', root, 'test')
-    assert not calls
+        state['frontiers']['binance_spot_top20_v1'] = str(
+            datetime.fromisoformat(state['frontiers']['binance_spot_top20_v1']) + timedelta(minutes=1))
+        guard.main('verify', tmp_path, 'test')
+        for value in ('2026-10-26 20:52:00', '2026-10-26 20:54:00'):
+            state['frontiers']['binance_spot_book'] = value
+            with pytest.raises(RuntimeError, match=r'regressed|frontier changed'):
+                guard.main('check', tmp_path, 'test')
+        state['frontiers']['binance_spot_book'] = '2026-10-26 20:53:00'
+    # Invalid rollback is rejected by the actual entry point before any Docker invocation.
+    import os
+    binary = tmp_path / 'docker'
+    marker = tmp_path / 'docker-called'
+    binary.write_text('#!/bin/sh\ntouch "' + str(marker) + '"\n')
+    binary.chmod(0o755)
+    result = subprocess.run(['python3', str(script), 'rollback', str(tmp_path), 'test'],
+                            env={**os.environ, 'PATH': str(tmp_path) + os.pathsep + os.environ['PATH']},
+                            capture_output=True, text=True)
+    assert result.returncode != 0 and not marker.exists()
+    assert not (tmp_path / '.render-top20-floor').exists()
+
 
 
 def test_recovery_requires_positive_container_retirement(tmp_path: Path) -> None:

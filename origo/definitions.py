@@ -8,24 +8,16 @@
 # 6. If applicable, add a schedule for the job and add it to the schedules list
 
 from collections.abc import Iterator
-from datetime import date
-from typing import Protocol
 
 from dagster import (
     AssetCheckResult,
     AssetCheckSpec,
-    AssetKey,
     AssetsDefinition,
     AssetSpec,
     Failure,
     FreshnessPolicy,
-    DefaultSensorStatus,
     Definitions,
-    RunRequest,
-    SkipReason,
-    asset_sensor,
     define_asset_job,
-    in_process_executor,
     multi_asset_check,
 )
 
@@ -33,201 +25,14 @@ from .orchestration.recovery import recover_orchestration_job
 
 from .assets.create_origo_database import (
     create_origo_database,
-    get_clickhouse_settings as get_origo_clickhouse_settings,
-    make_clickhouse_client as make_origo_clickhouse_client,
 )
-from .assets.build_depth_snapshot_store_arrow import build_depth_snapshot_store_arrow
 from .workers.market_state_api import ASSET as MARKET_STATE_QUERY_ASSET
 from .workers.runtime import LIVE_FEED_FRESHNESS_WINDOW
 
 
-class _DagsterEventLike(Protocol):
-    partition: str | None
-
-
-class _AssetEventLike(Protocol):
-    dagster_event: _DagsterEventLike | None
-    run_id: str
-
-
-# Database Maintenance Jobs
-
 create_origo_database_job = define_asset_job(
-    name="create_origo_database_job",
-    selection=["create_origo_database"]
+    name='create_origo_database_job', selection=['create_origo_database'],
 )
-
-
-create_binance_spot_depth20_snapshots_table_origo_job = define_asset_job(
-    name="create_binance_spot_depth20_snapshots_table_origo_job",
-    selection=["create_binance_spot_depth20_snapshots_table_origo"]
-)
-
-create_binance_spot_depth20_1m_table_origo_job = define_asset_job(
-    name="create_binance_spot_depth20_1m_table_origo_job",
-    selection=["create_binance_spot_depth20_1m_table_origo"]
-)
-
-create_binance_spot_depth200_snapshots_table_origo_job = define_asset_job(
-    name='create_binance_spot_depth200_snapshots_table_origo_job',
-    selection=['create_binance_spot_depth200_snapshots_table_origo'],
-)
-
-create_binance_spot_depth200_1m_table_origo_job = define_asset_job(
-    name='create_binance_spot_depth200_1m_table_origo_job',
-    selection=['create_binance_spot_depth200_1m_table_origo'],
-)
-
-
-# Data Insertion Jobs
-
-
-_BINANCE_SPOT_DEPTH20_DATA_SOURCE_SELECTION = [
-    'sync_binance_spot_depth20_snapshots_to_origo',
-    'refresh_binance_spot_depth20_1m_origo',
-]
-
-_BINANCE_SPOT_DEPTH200_DATA_SOURCE_SELECTION = [
-    'sync_binance_spot_depth200_snapshots_to_origo',
-    'refresh_binance_spot_depth200_1m_origo',
-]
-
-refresh_binance_spot_depth20_data_source_job = define_asset_job(
-    name='refresh_binance_spot_depth20_data_source_job',
-    selection=_BINANCE_SPOT_DEPTH20_DATA_SOURCE_SELECTION,
-)
-
-refresh_binance_spot_depth200_data_source_job = define_asset_job(
-    name='refresh_binance_spot_depth200_data_source_job',
-    selection=_BINANCE_SPOT_DEPTH200_DATA_SOURCE_SELECTION,
-)
-
-
-backfill_binance_spot_depth20_data_source_job = define_asset_job(
-    name='backfill_binance_spot_depth20_data_source_job',
-    selection=_BINANCE_SPOT_DEPTH20_DATA_SOURCE_SELECTION,
-)
-
-backfill_binance_spot_depth200_data_source_job = define_asset_job(
-    name='backfill_binance_spot_depth200_data_source_job',
-    selection=_BINANCE_SPOT_DEPTH200_DATA_SOURCE_SELECTION,
-)
-
-repair_binance_spot_depth20_projection_job = define_asset_job(
-    name='repair_binance_spot_depth20_projection_job',
-    selection=['refresh_binance_spot_depth20_1m_origo'],
-)
-
-repair_binance_spot_depth200_projection_job = define_asset_job(
-    name='repair_binance_spot_depth200_projection_job',
-    selection=['refresh_binance_spot_depth200_1m_origo'],
-)
-
-repair_binance_spot_depth20_1m_history_job = define_asset_job(
-    name='repair_binance_spot_depth20_1m_history_job',
-    selection=['repair_binance_spot_depth20_1m_history_origo'],
-)
-
-reconcile_binance_spot_depth20_partition_state_origo_job = define_asset_job(
-    name='reconcile_binance_spot_depth20_partition_state_origo_job',
-    selection=['reconcile_binance_spot_depth20_partition_state_origo'],
-)
-
-reconcile_binance_spot_depth200_partition_state_origo_job = define_asset_job(
-    name='reconcile_binance_spot_depth200_partition_state_origo_job',
-    selection=['reconcile_binance_spot_depth200_partition_state_origo'],
-)
-
-publish_btc_briefing_feed_job = define_asset_job(
-    name="publish_btc_briefing_feed_job",
-    selection=["publish_btc_briefing_feed"])
-
-publish_btc_briefing_history_job = define_asset_job(
-    name="publish_btc_briefing_history_job",
-    selection=["publish_btc_briefing_history"])
-
-build_depth_snapshot_store_arrow_job = define_asset_job(
-    name='build_depth_snapshot_store_arrow_job',
-    selection=[build_depth_snapshot_store_arrow],
-    executor_def=in_process_executor,
-)
-
-# The first day of binance_spot_depth20_1m in production. A canonical spot day before it
-# (a historical relaunch) has no order-book rows, so a briefing run for it can only fail.
-BRIEFING_FIRST_DAY = date(2026, 5, 14)
-
-
-def _partitioned_run_request(
-    asset_event: _AssetEventLike,
-    *,
-    run_key_prefix: str,
-) -> RunRequest | SkipReason:
-    if not asset_event.dagster_event:
-        return SkipReason("No Dagster event was attached to the materialization.")
-
-    partition_key = asset_event.dagster_event.partition
-    if partition_key is None:
-        return SkipReason("The materialization did not include a partition key.")
-    if date.fromisoformat(partition_key) < BRIEFING_FIRST_DAY:
-        return SkipReason(
-            f"{partition_key} precedes the book projection's first day {BRIEFING_FIRST_DAY}."
-        )
-
-    return RunRequest(
-        partition_key=partition_key,
-        run_key=f"{run_key_prefix}::{partition_key}::{asset_event.run_id}",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("build_binance_spot_trades_canonical_revision_origo"),
-    job=publish_btc_briefing_feed_job,
-    default_status=DefaultSensorStatus.STOPPED,
-)
-def publish_btc_briefing_feed_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _partitioned_run_request(
-        asset_event,
-        run_key_prefix="publish_btc_briefing_feed",
-    )
-
-
-def _publish_btc_briefing_history_run_request(
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    """Republish the rolling history for the day whose briefing feed just landed.
-
-    The history covers the span before its partition day and the feed file for
-    that day continues it, so the two are only consistent when the history is
-    rebuilt off the feed's own materialization rather than off a second clock.
-    """
-    if not asset_event.dagster_event:
-        return SkipReason(
-            "No Dagster event was attached to the BTC briefing feed materialization."
-        )
-
-    partition_key = asset_event.dagster_event.partition
-    if partition_key is None:
-        return SkipReason("BTC briefing feed materialization did not include a partition key.")
-
-    return RunRequest(
-        partition_key=partition_key,
-        run_key=f"publish_btc_briefing_history::{partition_key}::{asset_event.run_id}",
-    )
-
-
-@asset_sensor(
-    asset_key=AssetKey("publish_btc_briefing_feed"),
-    job=publish_btc_briefing_history_job,
-    default_status=DefaultSensorStatus.STOPPED,
-)
-def publish_btc_briefing_history_sensor(
-    context: object,
-    asset_event: _AssetEventLike,
-) -> RunRequest | SkipReason:
-    return _publish_btc_briefing_history_run_request(asset_event)
 
 
 # The monitor worker (origo.workers.monitor) evaluates these checks every minute from
@@ -297,7 +102,6 @@ from .sources.registry import SOURCE_REGISTRY
 
 _registered_source_bundles = tuple(
     build_source_bundle(spec) for spec in SOURCE_REGISTRY
-    if spec.key not in ('binance_spot_book', 'binance_perp_book')
 )
 
 defs = Definitions.merge(

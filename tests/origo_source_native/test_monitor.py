@@ -26,13 +26,12 @@ from origo.definitions import MONITOR_CHECK_NAMES, defs, origo_monitor_checks
 from origo.law import LawReport, evaluate
 from origo.law_catalog import build_catalog
 from origo.observatory import LAW_NAMES
-from origo.sources.adapters.book_spool import Market
+from origo.sources.adapters.render_book import Market
 from origo.sources.contracts import RolloutStage
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.dagster_reader import DagsterReader
 from origo.workers.monitor import (
     DELIVERY_LAG_SECONDS,
-    CollectorProbe,
     Cursor,
     Finding,
     LawTape,
@@ -60,9 +59,6 @@ class _Recorder(ThreadingHTTPServer):
         self.graphql: dict[str, object] = {
             path.stem: json.loads(path.read_text()) for path in FIXTURES.glob('*.json')
         }
-        self.history_rows = True
-        self.history_malformed = False
-        self.history_calls: list[str] = []
         self.render_calls: list[str] = []
         self.render_status: dict[str, bytes] = {}
         self.render_offline: set[str] = set()
@@ -135,14 +131,6 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == '/healthz':
             self._respond(200, b'ok\n')
             return
-        if self.path.startswith('/history'):
-            server.history_calls.append(self.path)
-            if server.history_malformed:
-                self.wfile.write(b'garbage without a status line\r\n')
-                self.close_connection = True
-                return
-            self._respond(200, b'{"ts": 1}\n' if server.history_rows else b'')
-            return
         self._respond(404, {'error': self.path})
 
     def log_message(self, format: str, *args: object) -> None:
@@ -210,7 +198,6 @@ def _monitor(
     *,
     client: object | None = None,
     dagster_url: str | None = None,
-    probes: tuple[CollectorProbe, ...] = (),
     settings: AlertSettings | None = None,
     publication_root: Path | None = None,
 ) -> Monitor:
@@ -219,7 +206,7 @@ def _monitor(
         publication_root.mkdir(parents=True, exist_ok=True)
     workers = [f'provisional_{spec.key}' for spec in SOURCE_REGISTRY
                if spec.provisional is not None and spec.rollout_stage != RolloutStage.DORMANT]
-    for feed in (*workers, 'market_state_api', 'perp_capture', 'book_capture_spot', 'book_capture_perp'):
+    for feed in (*workers, 'market_state_api', 'perp_capture'):
         heartbeat = heartbeat_path(tmp_path / 'heartbeats', feed)
         if not heartbeat.exists():
             touch_heartbeat(heartbeat)
@@ -230,15 +217,6 @@ def _monitor(
         'last_poll_gap_seconds': None, 'error_code': None,
     }
     (tmp_path / 'heartbeats' / 'perp_capture.status.json').write_text(json.dumps(status))
-    # Controlled operational evidence; real market rows live in the book capture fixtures.
-    stamp = datetime.now(UTC)
-    for market in ('spot', 'perp'):
-        book_status = {'schema_version': 1, 'market': market, 'committed_at': stamp.isoformat(),
-                       'last_event_at': stamp.isoformat(), 'last_received_at': stamp.isoformat(),
-                       'last_seal_at': (stamp - timedelta(seconds=60)).isoformat(),
-                       'book_verified': True, 'spool_bytes': 0, 'error_code': None,
-                       'attempts': {'seed_total': 0, 'seed_weight': 0, 'connection_total': 0}}
-        (tmp_path / 'heartbeats' / f'book_capture_{market}.status.json').write_text(json.dumps(book_status))
     return Monitor(
         dagster=DagsterReader(dagster_url or _url(server), timeout_seconds=2.0),
         client=cast(Any, client or _EmptyClient()),
@@ -246,7 +224,6 @@ def _monitor(
         law_client=_EmptyClient(),
         law_root=tmp_path / 'law',
         heartbeat_dir=tmp_path / 'heartbeats',
-        probes=probes,
         settings=settings if settings is not None else _settings(server),
         reporter=Reporter(_url(server), timeout_seconds=2.0),
         cursor_path=tmp_path / 'monitor.cursor.json',
@@ -467,23 +444,18 @@ def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worke
 
 
 def test_monitor_distinguishes_collector_outage_from_worker_silence(
-    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv('DEPTH20_PROBE_URL', _url(recorder))
-    monkeypatch.setenv('DEPTH20_PROBE_TOKEN', 'probe-token')
-    probes = (CollectorProbe('depth20', 'DEPTH20_PROBE_URL', 'DEPTH20_PROBE_TOKEN'),)
-    recorder.history_rows = False
-    outcome = _monitor(recorder, tmp_path, probes=probes).tick(NOW)
-    assert 'collector_silent:depth20' in outcome.failed
+    recorder.render_offline.add('A')
+    outcome = _monitor(recorder, tmp_path).tick(NOW)
+    assert {'collector_book:A:spot', 'collector_book:A:perp'} <= set(outcome.failed)
     assert not any(key.startswith('heartbeat_stale') for key in outcome.failed)
-    minute = int((NOW - timedelta(minutes=1)).timestamp())
-    assert recorder.history_calls == [f'/history?from={minute}&to={minute}']
+    assert sorted(recorder.render_calls) == ['/render/A/status', '/render/B/status']
     serving = [post for post in _check_posts(recorder) if post['check_name'] == 'collectors_serving']
     assert serving[0]['passed'] is False
-
-    recorder.history_rows = True
-    healthy = _monitor(recorder, tmp_path / 'healthy', probes=probes).tick(NOW)
-    assert not any(key.startswith('collector_silent') for key in healthy.failed)
+    recorder.render_offline.clear()
+    healthy = _monitor(recorder, tmp_path / 'healthy').tick(NOW)
+    assert not any(key.startswith('collector_book:') for key in healthy.failed)
 
 
 def test_monitor_alerts_on_error_rows_in_container_log(
@@ -762,15 +734,13 @@ def test_late_deliveries_and_malformed_collector_responses_are_still_reported(
     finally:
         client.disconnect()
 
-    monkeypatch.setenv('DEPTH20_PROBE_URL', _url(recorder))
-    monkeypatch.setenv('DEPTH20_PROBE_TOKEN', 'probe-token')
-    recorder.history_malformed = True
-    probes = (CollectorProbe('depth20', 'DEPTH20_PROBE_URL', 'DEPTH20_PROBE_TOKEN'),)
-    outcome = _monitor(recorder, tmp_path / 'malformed', probes=probes).tick(NOW)
-    assert 'collector_silent:depth20' in outcome.failed
+    # Deliberate malformed status envelope; it is never a market observation.
+    recorder.render_status['A'] = b'{malformed status'
+    outcome = _monitor(recorder, tmp_path / 'malformed').tick(NOW)
+    assert {'collector_book:A:spot', 'collector_book:A:perp'} <= set(outcome.failed)
     assert not any(key.startswith('detector_failed') for key in outcome.failed)
     serving = [post for post in _check_posts(recorder) if post['check_name'] == 'collectors_serving']
-    assert serving[-1]['passed'] is False and serving[-1]['metadata']['findings'] == 1
+    assert serving[-1]['passed'] is False and serving[-1]['metadata']['findings'] == 2
 
 
 class _SpanClient(_EmptyClient):
@@ -968,9 +938,8 @@ def test_law_tape_precedes_unheld_dagit_and_held_mail(
     assert len(report['gates']) < len(monitor.catalog['gates'])
     assert all(event['reason'] != 'not_observed' for event in report['gates'])
     assert all(event['catalog_version'] == report['catalog_version'] for event in report['gates'])
-    # Dormant declarations still carry historical projection metadata until physical retirement.
-    # The per-declaration bound is below the previous ten-feed 80-KiB total ceiling.
-    assert len(json.dumps(report, separators=(',', ':')).encode()) < 8 * 1024 * len(monitor.catalog['sources'])
+    # Keep the pre-retirement 64-KiB ceiling after removing the dormant declarations.
+    assert len(json.dumps(report, separators=(',', ':')).encode()) < 64 * 1024
     assert _check_posts(recorder)[checked.index('data_current')]['passed'] is False
     email = _emails(recorder)[0]
     assert 'Live source data is fresh' in email['text']
@@ -1536,10 +1505,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         (stamp.replace(tzinfo=None), 'monitor-test', 'test', 'stderr', 'ERROR', 'Protocol boundary fault')
         for stamp in stamps
     ])
-    monkeypatch.setenv('OVERVIEW_COLLECTOR', _url(recorder))
-    monkeypatch.setenv('OVERVIEW_TOKEN', 'test')
-    monitor = _monitor(recorder, tmp_path, client=tracked,
-                       probes=(CollectorProbe('depth20', 'OVERVIEW_COLLECTOR', 'OVERVIEW_TOKEN'),))
+    monitor = _monitor(recorder, tmp_path, client=tracked)
     Cursor(since.timestamp(), since.isoformat(), since.isoformat(), {}, '', 0, 0).save(monitor.cursor_path)
     heartbeat_calls: list[datetime] = []
     heartbeats = monitor._heartbeats
@@ -1568,8 +1534,8 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         assert measured['counts_limited'] is False
     assert evidence('queue_bounded')['queued_runs'] == 0
     assert evidence('dagster_reachable')['reachable'] is True
-    assert evidence('collectors_serving')['collectors_serving'] == 6
-    assert len(tracked.calls) == 3 and len(heartbeat_calls) == len(recorder.history_calls) == 1
+    assert evidence('collectors_serving')['collectors_serving'] == 5
+    assert len(tracked.calls) == 3 and len(heartbeat_calls) == 1 and len(recorder.render_calls) == 2
     for query, params in tracked.calls[:2]:
         assert 'LIMIT 1000' in query
         assert params == {'since': since.replace(tzinfo=None), 'until': until.replace(tzinfo=None)}
@@ -1594,7 +1560,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
     assert evidence('workers_alive')['workers_fresh'] == 7
     assert evidence('workers_alive')['failed_receipts'] == evidence('no_error_logs')['error_lines'] == 1000
     assert evidence('workers_alive')['counts_limited'] is evidence('no_error_logs')['counts_limited'] is True
-    assert len(tracked.calls) == 6 and len(heartbeat_calls) == len(recorder.history_calls) == 2
+    assert len(tracked.calls) == 6 and len(heartbeat_calls) == 2 and len(recorder.render_calls) == 4
 
     tracked.fail = True
     recorder.graphql['Health'] = {'errors': [{'message': 'Protocol fault: unavailable'}]}
@@ -1606,7 +1572,7 @@ def test_overview_evidence_reuses_reads_and_preserves_unknowns(
         assert evidence('workers_alive')[key] is None
     assert evidence('no_error_logs')['error_lines'] is None
     assert evidence('no_error_logs')['window_start'] is None
-    assert len(tracked.calls) == 9 and len(heartbeat_calls) == len(recorder.history_calls) == 3
+    assert len(tracked.calls) == 9 and len(heartbeat_calls) == 3 and len(recorder.render_calls) == 6
 
     def unavailable_publication() -> list[Finding]:
         raise RuntimeError('Protocol fault before publication detector entry')
@@ -2097,43 +2063,6 @@ def test_pending_retry_restores_monotonic_delay_after_restart_and_forward_clock_
     assert len(dispatches) == 2 and dispatches[1] - dispatches[0] == retry_after + 1
 
 
-@pytest.mark.parametrize('market', ['spot', 'perp'])
-def test_book_capture_health_uses_bounded_local_evidence(
-    recorder: _Recorder, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, market: Market,
-) -> None:
-    from origo.sources.adapters.book_spool import object_mapping
-    from origo.workers import book_capture
-
-    from .test_book_capture import replay
-
-    def forbidden(*args: object, **kwargs: object) -> object:
-        pytest.fail('Monitor and health reads must never request Binance data.')
-    monkeypatch.setattr(book_capture, 'get_response', forbidden)
-    monitor = _monitor(recorder, tmp_path)
-    # This capture clock comes from a real recorded exchange event and receive timestamp.
-    sampler = replay(tmp_path / 'spool', market)
-    assert sampler.last_received is not None
-    now = sampler.last_received
-    path = book_capture.status_path(monitor.heartbeat_dir, market)
-    book_capture.publish_status(sampler, book_capture.AttemptBudget(tmp_path / 'locks', market), path, None)
-    status = dict(object_mapping(json.loads(path.read_bytes())))
-    status['committed_at'] = now.isoformat()
-    path.write_text(json.dumps(status))
-    # Isolate the recorded acquisition evidence for this market.
-    monitor_book_registry = tuple(replace(spec, rollout_stage=RolloutStage.CANARY)
-                                  for spec in SOURCE_REGISTRY if spec.key == f'binance_{market}_book')
-    monkeypatch.setattr('origo.workers.monitor.SOURCE_REGISTRY', monitor_book_registry)
-    assert monitor._book_capture_findings(now) == []
-    assert monitor.book_evidence[f'collector_book:{market}']['spool_bytes']
-    assert monitor._book_capture_findings(now + timedelta(seconds=6))[0].key == f'collector_book:{market}'
-    status['book_verified'] = False
-    status['error_code'] = 'BOOK_ATTEMPT_LIMIT'
-    path.write_text(json.dumps(status))
-    assert monitor._book_capture_findings(now)[0].key == f'collector_book:{market}'
-    path.write_bytes(path.read_bytes() + b' ' * (16 * 1024))
-    assert 'exceeds 16 KiB' in monitor._book_capture_findings(now)[0].detail
-    path.unlink()
-    assert monitor._book_capture_findings(now)[0].key == f'collector_book:{market}'
 
 
 def test_render_status_uses_original_clocks_and_isolates_replica_failures(

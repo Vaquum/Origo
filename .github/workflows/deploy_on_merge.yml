@@ -101,12 +101,7 @@ jobs:
           CLICKHOUSE_PASSWORD: test-password
           HF_TOKEN: test-token
           HUGGINGFACE_DATASET_REPO_ID: ${{ env.HUGGINGFACE_DATASET_REPO_ID }}
-          BINANCE_SPOT_DEPTH20_BASE_URL: ${{ secrets.BINANCE_SPOT_DEPTH20_BASE_URL }}
-          BINANCE_SPOT_DEPTH20_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH20_AUTH_TOKEN }}
-          BINANCE_SPOT_DEPTH200_BASE_URL: ${{ secrets.BINANCE_SPOT_DEPTH200_BASE_URL }}
-          BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
-          ORIGO_BOOK_TOP20_TOKEN: ${{ secrets.ORIGO_BOOK_TOP20_TOKEN }}
           ORIGO_RENDER_BOOK_A_TOKEN: ${{ secrets.ORIGO_RENDER_BOOK_A_TOKEN }}
           ORIGO_RENDER_BOOK_B_TOKEN: ${{ secrets.ORIGO_RENDER_BOOK_B_TOKEN }}
           RESEND_API_KEY: test-key
@@ -134,7 +129,7 @@ jobs:
           scp docker-compose.deploy.yml "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/docker-compose.deploy.yml"
           scp deploy/vector.yaml "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/deploy/vector.yaml"
           scp deploy/60-origo-egress.yaml deploy/prepare_binance_egress.sh "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/deploy/"
-          scp deploy/retire_render_top20_workers.sh deploy/retire_legacy_book_workers.sh "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/deploy/"
+          scp deploy/retire_legacy_book_files.sh "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/deploy/"
           scp deploy/render_top20_deploy.py "$ORIGO_USER@$ORIGO_HOST:$DEPLOY_DIR/deploy/"
 
       - name: Deploy updated images
@@ -143,12 +138,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          BINANCE_SPOT_DEPTH20_BASE_URL: ${{ secrets.BINANCE_SPOT_DEPTH20_BASE_URL }}
-          BINANCE_SPOT_DEPTH20_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH20_AUTH_TOKEN }}
-          BINANCE_SPOT_DEPTH200_BASE_URL: ${{ secrets.BINANCE_SPOT_DEPTH200_BASE_URL }}
-          BINANCE_SPOT_DEPTH200_AUTH_TOKEN: ${{ secrets.BINANCE_SPOT_DEPTH200_AUTH_TOKEN }}
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
-          ORIGO_BOOK_TOP20_TOKEN: ${{ secrets.ORIGO_BOOK_TOP20_TOKEN }}
           ORIGO_RENDER_BOOK_A_TOKEN: ${{ secrets.ORIGO_RENDER_BOOK_A_TOKEN }}
           ORIGO_RENDER_BOOK_B_TOKEN: ${{ secrets.ORIGO_RENDER_BOOK_B_TOKEN }}
         run: |
@@ -167,12 +157,7 @@ jobs:
               "CLICKHOUSE_IMAGE": os.environ["CLICKHOUSE_IMAGE"],
               "CLICKHOUSE_PASSWORD": os.environ["CLICKHOUSE_PASSWORD"],
               "HF_TOKEN": os.environ["HF_TOKEN"],
-              "BINANCE_SPOT_DEPTH20_BASE_URL": os.environ["BINANCE_SPOT_DEPTH20_BASE_URL"],
-              "BINANCE_SPOT_DEPTH20_AUTH_TOKEN": os.environ["BINANCE_SPOT_DEPTH20_AUTH_TOKEN"],
-              "BINANCE_SPOT_DEPTH200_BASE_URL": os.environ["BINANCE_SPOT_DEPTH200_BASE_URL"],
-              "BINANCE_SPOT_DEPTH200_AUTH_TOKEN": os.environ["BINANCE_SPOT_DEPTH200_AUTH_TOKEN"],
               "BINANCE_API_KEY": os.environ["BINANCE_API_KEY"],
-              "ORIGO_BOOK_TOP20_TOKEN": os.environ["ORIGO_BOOK_TOP20_TOKEN"],
               "ORIGO_RENDER_BOOK_A_TOKEN": os.environ["ORIGO_RENDER_BOOK_A_TOKEN"],
               "ORIGO_RENDER_BOOK_B_TOKEN": os.environ["ORIGO_RENDER_BOOK_B_TOKEN"],
               "ORIGO_NATIVE_JOBS_ONLY": os.environ["ORIGO_NATIVE_JOBS_ONLY"],
@@ -215,8 +200,6 @@ jobs:
 
           cd "$DEPLOY_DIR"
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml pull
-          # Retired hourly authority must disappear before daily bootstrap changes any source state.
-          docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python dagster /opt/app/tools/book_deploy_preflight.py </dev/null
           # Before any container is replaced, the new image must read every activated component.
           docker compose -p "$PROJECT_NAME" -f docker-compose.deploy.yml run --rm --no-deps -T --entrypoint python dagster -m origo.sources.compatibility </dev/null
           retained_workers=()
@@ -457,6 +440,7 @@ jobs:
           if [ "${ORIGO_NATIVE_JOBS_ONLY:-false}" = true ]; then
             python3 deploy/render_top20_deploy.py verify "$DEPLOY_DIR" "$PROJECT_NAME"
           fi
+          bash deploy/retire_legacy_book_files.sh
           echo 'post-up: deployment verified'
           REMOTE
 

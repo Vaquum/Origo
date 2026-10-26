@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import gzip
 import json
 import re
 import socket
@@ -39,23 +40,11 @@ BASELINE = Path(__file__).parents[1] / 'fixtures/law/overview-baseline-58b45de.j
 def _catalog_template(deployed_sha: str) -> LawCatalog:
     baseline = json.loads(BASELINE.read_bytes())
     if deployed_sha == baseline['deployed_sha']:
-        from dataclasses import replace
-
-        from origo.sources import registry
-        from origo.sources.contracts import RolloutStage
-        from origo.workers import depth
-
-        # Historical GUI replay keeps the pre-pause declaration envelope and original evidence.
-        legacy_depth = (depth.DEPTH20_LIVE_RECONCILIATION_SPEC, depth.DEPTH200_LIVE_RECONCILIATION_SPEC)
-        legacy = tuple(replace(spec, rollout_stage=RolloutStage.CANARY)
-                       if spec.key in ('binance_spot_book', 'binance_perp_book') else spec
-                       for spec in registry.SOURCE_REGISTRY)
-        with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(registry, 'SOURCE_REGISTRY', legacy)
-            patch.setattr(depth, 'DEPTH_SPECS', legacy_depth)
-            patch.setattr(law, 'LAW_INVENTORY', (*law.LAW_INVENTORY, 'binance_spot_book',
-                          'binance_perp_book', *(spec.projection_table_name for spec in legacy_depth)))
-            return build_catalog(deployed_sha)
+        # Genuine pre-retirement declaration envelope; original report/code identities stay unchanged.
+        return cast(LawCatalog, json.loads(gzip.decompress(
+            (BASELINE.parent / 'catalog-before-book-retirement.json.gz').read_bytes()
+        )))
+    return build_catalog(deployed_sha)
     return build_catalog(deployed_sha)
 
 

@@ -377,6 +377,35 @@ def test_hourly_recovery_and_activation(
         == activation_history
     )
 
+    # Deliberate obsolete schema artifacts exercise the real bootstrap retirement.
+    # No old market records are invented; the accepted replacement rows are genuine.
+    retired = runtime.spec.retired_tables
+    for name in retired:
+        if not name.endswith('_current'):
+            runtime.store.execute(f'CREATE TABLE origo.{name} (retired_control UInt8) ENGINE=Memory')
+    for name in retired:
+        if name.endswith('_current'):
+            target = name.removesuffix('_current') + '_revisions'
+            runtime.store.execute(f'CREATE VIEW origo.{name} AS SELECT * FROM origo.{target}')
+    historical = runtime.store.execute(
+        'SELECT partition_key,revision,build_id,generation FROM origo.source_activation_log '
+        'ORDER BY partition_key,generation'
+    )
+    for _ in range(2):
+        runtime.setup()
+        assert not runtime.store.execute(
+            "SELECT name FROM system.tables WHERE database='origo' AND name IN %(names)s",
+            {'names': retired},
+        )
+        assert runtime.store.execute(
+            'SELECT partition_key,revision,build_id,generation FROM origo.source_activation_log '
+            'ORDER BY partition_key,generation'
+        ) == historical
+        assert runtime.store.record(record.partition) == record
+        assert [json.loads(str(row[0])) for row in runtime.store.execute(
+            f'SELECT original_snapshot FROM {raw_view} ORDER BY datetime'
+        )] == actual
+
     table = runtime.store.component_table('depth20')
     runtime.store.execute(
         f"ALTER TABLE {table} DELETE WHERE partition_key='{HOUR}' AND toStartOfMinute(datetime)='2026-10-24 13:21:00' SETTINGS mutations_sync=2"
@@ -998,7 +1027,7 @@ def test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output(
     ))
     monitor = Monitor(
         dagster=_Dagster(), client=runtime.store.client, database='origo',
-        heartbeat_dir=tmp_path / 'heartbeats', probes=(), settings=None,
+        heartbeat_dir=tmp_path / 'heartbeats', settings=None,
         reporter=_Reporter(), cursor_path=tmp_path / 'monitor.json',
         publication_root=tmp_path / 'source-files', law_client=runtime.store.client,
         law_root=tmp_path / 'law', arrow_root=tmp_path / 'arrow',

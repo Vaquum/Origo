@@ -655,7 +655,7 @@ def _reclaim_render_payloads(
     reclaimed, charged = 0, 0
     verified: set[str] = set()
     reported_expiry: set[str] = set()
-    with source_lock(runtime.lock_root, runtime.spec.key, 'heavy'):
+    with source_lock(runtime.lock_root, runtime.spec.key, 'heavy', wait=True):
         after = str(json.loads(cursor.read_bytes())) if cursor.exists() else ''
         candidates = sorted(
             path for replica in REPLICAS

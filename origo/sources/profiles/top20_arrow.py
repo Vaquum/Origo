@@ -136,7 +136,7 @@ def publish_top20_arrow(
     consumed = _input(snapshot, start, end)
     manifest = root / 'latest.json'
     locks = Path(os.environ.get('ORIGO_SOURCE_LOCK_DIR', '/opt/origo/locks'))
-    with source_lock(locks, SOURCE, 'heavy', shared=True):
+    with source_lock(locks, SOURCE, 'heavy', shared=True, wait=True):
         previous: Mapping[str, object] = (
             object_mapping(json.loads(manifest.read_bytes())) if manifest.exists() else {}
         )

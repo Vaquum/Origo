@@ -26,7 +26,6 @@ from origo.definitions import MONITOR_CHECK_NAMES, defs, origo_monitor_checks
 from origo.law import LawReport, evaluate
 from origo.law_catalog import build_catalog
 from origo.observatory import LAW_NAMES
-from origo.sources.adapters.render_book import Market
 from origo.sources.contracts import RolloutStage
 from origo.sources.registry import SOURCE_REGISTRY
 from origo.workers.dagster_reader import DagsterReader
@@ -413,10 +412,20 @@ def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worke
     frame['sampling_slot'] = (NOW + timedelta(minutes=1)).isoformat()
     frame.pop('notification_transitions', None)
     template = next(item for item in frame['observations'] if item['group_id'] == f'heartbeat_stale:{missing}')
+    event_template = next(item for item in frame['observations'] if item['kind'] == 'event_stream')
     retired_groups = {'heartbeat_stale:depth', 'law.R1:binance_spot_book',
-                      'law:R1:binance_spot_book', 'collector_book:spot'}
-    frame['observations'].extend({**deepcopy(template), 'group_id': group, 'scope': group,
-                                  'detector_keys': [group], 'measurements': []} for group in sorted(retired_groups))
+                      'law:R1:binance_spot_book', 'collector_book:spot',
+                      'check_failed:reconcile_binance_spot_book_source_origo:source_health',
+                      'check_failed:reconcile_binance_perp_book_source_origo:source_health'}
+    trade_check = 'check_failed:reconcile_binance_spot_trades_source_origo:source_health'
+    frame['observations'].extend({
+        **deepcopy(event_template if group.startswith('check_failed:') else template),
+        'group_id': group, 'scope': group,
+        'kind': 'event_stream' if group.startswith('check_failed:') else template['kind'],
+        'check': 'check_failed' if group.startswith('check_failed:') else template['check'],
+        'read_window_key': 'check_failed' if group.startswith('check_failed:') else None,
+        'detector_keys': [group],
+    } for group in sorted(retired_groups | {trade_check}))
     monitor.notification_history.append(frame, None, NOW + timedelta(minutes=1))
     recorded = monitor.notification_history.frames[frame['sampling_slot']]
     monitor.tick(NOW + timedelta(minutes=2))
@@ -427,6 +436,25 @@ def test_monitor_requires_each_source_heartbeat_and_ignores_retired_shared_worke
     incidents = {item['group_id'] for item in summary['incidents']}
     assert not retired_groups & incidents
     assert f'heartbeat_stale:{missing}' in incidents
+    # Isolate the event boundary from the summary's unrelated-incident byte cap.
+    from origo.observatory import build_summary
+
+    events = deepcopy(frame)
+    events['observations'] = [item for item in events['observations']
+                              if item['group_id'].startswith('check_failed:')]
+    event_summary = build_summary({'checked_at': frame['sampling_slot']},
+                                  cast(Any, monitor.catalog), [events], now=NOW + timedelta(minutes=2))
+    event_incidents = {item['group_id'] for item in event_summary['incidents']}
+    assert not retired_groups & event_incidents
+    assert trade_check in event_incidents
+    previous_catalog = deepcopy(monitor.catalog)
+    assert previous_catalog is not None
+    previous_catalog['sources'].append({'id': 'binance_spot_book', 'rollout_stage': 'LIVE',
+                                        'name': 'Spot book', 'projections': []})
+    previous = build_summary({'checked_at': frame['sampling_slot']}, cast(Any, previous_catalog),
+                             [events], now=NOW + timedelta(minutes=2))
+    assert {item['group_id'] for item in previous['incidents']} == {
+        item['group_id'] for item in events['observations']}
     monkeypatch.setenv('ORIGO_TRADE_MAINTENANCE', '1')
     split = _monitor(recorder, tmp_path / 'split')
     roles = ('trade_publication_binance_spot_trades',

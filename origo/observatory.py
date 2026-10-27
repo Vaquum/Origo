@@ -202,6 +202,8 @@ def retired_book_condition(group: str, catalog: Document) -> bool:
         'heartbeat_stale:book_capture_perp', 'heartbeat_stale:provisional_binance_spot_book',
         'heartbeat_stale:provisional_binance_perp_book', 'collector_book:spot',
         'collector_book:perp', 'collector_silent:depth20', 'collector_silent:depth200',
+        'check_failed:reconcile_binance_spot_book_source_origo:source_health',
+        'check_failed:reconcile_binance_perp_book_source_origo:source_health',
     }
 
 

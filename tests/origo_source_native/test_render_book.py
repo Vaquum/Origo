@@ -5,11 +5,14 @@ import json
 import tarfile
 import time
 from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from typing import cast
 from uuid import uuid4
 
@@ -30,7 +33,7 @@ from origo import law
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.law_catalog import build_catalog
 from origo.orchestration.verify_deploy import _render_conditions
-from origo.sources import capacity, dagit
+from origo.sources import capacity, dagit, lifecycle, locking
 from origo.sources.adapters import render_book
 from origo.sources.adapters.render_book import (
     Market,
@@ -47,6 +50,7 @@ from origo.sources.contracts import (
     SourceError,
 )
 from origo.sources.lifecycle import SourceRuntime
+from origo.sources.locking import source_lock
 from origo.sources.prepare import prepare_source
 from origo.sources.profiles import top20_arrow
 from origo.sources.storage import SourceStore
@@ -514,6 +518,7 @@ def test_expired_incomplete_cache_releases_live_import_capacity(
     runtime: SourceRuntime,
     recordings: dict[tuple[str, Market], RecordedFeed],
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Expired arrival buckets cannot exhaust live intake; original observations stay unchanged."""
     canonical = cast(RenderBookCanonical, runtime.spec.canonical)
@@ -534,21 +539,75 @@ def test_expired_incomplete_cache_releases_live_import_capacity(
     with pytest.raises(SourceError) as failure:
         cache.sync_tail('A', feed.read)
     assert failure.value.code == 'RENDER_CACHE_FULL'
-    assert canonical.audit_maintenance(runtime, START + timedelta(hours=146), lambda p: p.key) == 97
-    assert not list(cache.root.glob('spot/A/*/*.ndjson'))
-    assert runtime.store.execute(
-        "SELECT count() FROM origo.source_observation_log WHERE source_key=%(source)s "
-        "AND JSONExtractString(evidence_json,'phase')='completed'",
-        {'source': runtime.spec.key},
-    ) == [(97,)]
-    assert cache.sync_tail('A', feed.read) == (2, 0)
-    key = '2026-10-24T13:59:00Z'
-    runtime.build(key, provisional=True)
+    source = build_source_bundle(runtime.spec)
+    (tmp_path / 'dagster-lock-order').mkdir()
+    with DagsterInstance.local_temp(str(tmp_path / 'dagster-lock-order')) as instance:
+        def overlap(operation: str, shared: bool, config: dict[str, object]) -> None:
+            attempted = Event()
+
+            @contextmanager
+            def admission(
+                root: Path, name: str, fence: str, *, shared: bool = False, wait: bool = False,
+            ) -> Iterator[None]:
+                if name == runtime.spec.key and fence == 'heavy':
+                    attempted.set()
+                with source_lock(root, name, fence, shared=shared, wait=wait):
+                    yield
+
+            job = next(j for j in source.jobs if j.tags['origo_source_operation'] == operation)
+            with monkeypatch.context() as patch, ThreadPoolExecutor(max_workers=1) as executor:
+                patch.setattr(render_book, 'source_lock', admission)
+                patch.setattr(locking, 'source_lock', admission)
+                patch.setattr(top20_arrow, 'source_lock', admission)
+                with source_lock(runtime.lock_root, runtime.spec.key, 'heavy', shared=shared):
+                    future = executor.submit(job.execute_in_process, instance=instance,
+                                             run_config=config, raise_on_error=False)
+                    assert attempted.wait(timeout=15)
+                    with pytest.raises(FutureTimeout):
+                        future.result(timeout=0.2)
+                assert future.result(timeout=30).success
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz: object = None) -> datetime:
+                return START + timedelta(hours=146)
+
+        # Actual audit admission must wait for an active minute's shared fence.
+        with monkeypatch.context() as patch:
+            patch.setattr(lifecycle, 'datetime', Clock)
+            overlap('audit', True, {})
+        assert not list(cache.root.glob('spot/A/*/*.ndjson'))
+        assert runtime.store.execute(
+            "SELECT count() FROM origo.source_observation_log WHERE source_key=%(source)s "
+            "AND JSONExtractString(evidence_json,'phase')='completed'",
+            {'source': runtime.spec.key},
+        ) == [(97,)]
+        assert cache.sync_tail('A', feed.read) == (2, 0)
+        key = '2026-10-24T13:59:00Z'
+        # Actual minute admission must wait for the audit's exclusive fence.
+        overlap('provisional', False,
+                {'ops': {f'sync_{runtime.spec.key}_provisional_origo':
+                         {'config': {'partition_key': key}}}})
+        overlap('consumer_arrow', False,
+                {'ops': {f'publish_{runtime.spec.key}_arrow': {'config': {
+                    'destination': str(tmp_path / 'publications' / runtime.spec.key / 'arrow'),
+                }}}})
     assert runtime.store.execute(
         f'SELECT count(),uniqExact(datetime) FROM origo.{runtime.spec.key}_depth20_current'
     ) == [(60, 60)]
-    runtime.publish('arrow', str(tmp_path / 'publications' / runtime.spec.key / 'arrow'))
-    assert pl.read_ipc(tmp_path / 'arrow' / runtime.spec.key / 'latest.arrow').height == 60
+    exported = pl.read_ipc(tmp_path / 'arrow' / runtime.spec.key / 'latest.arrow')
+    assert exported.height == 60
+    first = int((START + timedelta(minutes=59)).timestamp()) * 1_000_000
+    originals = [json.loads(line) for body in feed.payloads.values() for line in body.splitlines()
+                 if first <= int(json.loads(line)['exchange_time']) < first + 60_000_000]
+    assert [json.loads(row) for row in exported['original_snapshot']] == sorted(
+        originals, key=lambda row: int(row['exchange_time']))
+    assert runtime.store.execute(
+        f'SELECT count() FROM origo.{runtime.spec.key}_depth20_1m_current',
+    ) == [(1,)]
+    assert runtime.store.execute(
+        "SELECT count() FROM origo.source_failure_log WHERE error_code='SOURCE_LOCK_BUSY'",
+    ) == [(0,)]
 
 
 def test_transport_restart_and_expiry(

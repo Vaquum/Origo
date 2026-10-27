@@ -200,7 +200,10 @@ class SourceRuntime:
         operation = 'provisional' if provisional else 'canonical'
         lock = _partition_lock(partition)
         try:
-            with partition_work(self.lock_root, self.spec.key, lock):
+            with partition_work(
+                self.lock_root, self.spec.key, lock,
+                wait=provisional and isinstance(self.spec.canonical, CanonicalAuditMaintenance),
+            ):
                 current = self.store.record(partition)
                 expected = current.generation if current is not None else 0
                 if provisional:

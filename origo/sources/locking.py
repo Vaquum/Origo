@@ -35,8 +35,10 @@ def source_lock(
 
 
 @contextmanager
-def partition_work(root: Path, source: str, partition_lock: str) -> Iterator[None]:
+def partition_work(
+    root: Path, source: str, partition_lock: str, *, wait: bool = False
+) -> Iterator[None]:
     # Concurrent partitions share the maintenance fence, but never their generation lock.
-    with source_lock(root, source, 'heavy', shared=True):
+    with source_lock(root, source, 'heavy', shared=True, wait=wait):
         with source_lock(root, source, partition_lock):
             yield

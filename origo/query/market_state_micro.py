@@ -256,6 +256,6 @@ def read_micro(client: Client, database: str, lock_root: Path, request: MicroReq
                        'grouping': 'Exchange aggregate trades, not parent-order identity',
                        'clocks': 'Half-open exchange-time intervals; book receipt strictly before asOf'},
         }
-        if len(json.dumps(answer, allow_nan=False, separators=(',', ':')).encode()) > MAX_REPLY:
+        if len(json.dumps(answer, allow_nan=False).encode()) > MAX_REPLY:
             raise RequestError(413, 'micro_result_too_large', 'Choose a shorter Micro range.')
         return answer

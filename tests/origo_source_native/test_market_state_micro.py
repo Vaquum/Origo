@@ -14,6 +14,7 @@ import polars as pl
 import pytest
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
+from origo.query import market_state_micro
 from origo.query.market_state import RequestError
 from origo.query.market_state_micro import (
     SPECS,
@@ -93,7 +94,7 @@ def _seed(client: Client) -> tuple[SourceStore, ...]:
 
 
 def test_micro_native_arithmetic_clocks_gaps_grouping_and_generation_fence(
-    origo_test_env: dict[str, str], tmp_path: Path,
+    origo_test_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The actual read rejects stale pins and exposes gaps, never duplicated volume or future quotes."""
     client = cast(Client, make_clickhouse_client(get_clickhouse_settings()))
@@ -113,6 +114,13 @@ def test_micro_native_arithmetic_clocks_gaps_grouping_and_generation_fence(
             server.server_close()
         bins = cast(list[dict[str, object]], answer['bins'])
         assert len(bins) == 30 and answer['schema'] == 'origo-micro@1'
+        compact_bytes = len(json.dumps(dict(answer), allow_nan=False, separators=(',', ':')).encode())
+        assert compact_bytes < len(json.dumps(dict(answer), allow_nan=False).encode())
+        # A genuine response at the compact boundary must still respect the actual HTTP bytes.
+        with monkeypatch.context() as patch:
+            patch.setattr(market_state_micro, 'MAX_REPLY', compact_bytes)
+            with pytest.raises(RequestError, match='shorter Micro range'):
+                read_micro(client, 'origo', tmp_path, request)
         raw = pl.read_parquet(FIXTURE / 'trades.parquet').filter(
             (pl.col('timestamp').dt.epoch('ms') >= start) & (pl.col('timestamp').dt.epoch('ms') < start + 30_000))
         groups = pl.read_parquet(FIXTURE / 'aggtrades.parquet').filter(

@@ -36,6 +36,7 @@ from uuid import uuid4
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.query.market_state import Request, RequestError, iso, parse_request, write_result
+from origo.query.market_state_micro import parse_micro_request, read_micro
 from origo.query.market_state_rallies import (
     RALLY_DEADLINE_SECONDS,
     RallyDiscoveryRequest,
@@ -151,6 +152,50 @@ class MarketStateApi:
             return 503, {'error': 'busy'}, {'Retry-After': '5'}
         try:
             return self._export(request)
+        finally:
+            self.queries.release()
+
+    def micro(self, raw: bytes, deliver: Callable[[Answer], bool]) -> None:
+        try:
+            request = parse_micro_request(raw)
+        except RequestError as error:
+            self._count_invalid()
+            deliver((error.status, error.body(), {}))
+            return
+        if not self.queries.acquire(blocking=False):
+            self._count('REJECTED', 'QUERY_BUSY')
+            deliver((503, {'error': 'busy'}, {'Retry-After': '5'}))
+            return
+        try:
+            try:
+                runtime, client = _runtime(self.lock_root)
+                try:
+                    payload = read_micro(client, runtime.store.database, self.lock_root, request)
+                finally:
+                    client.disconnect()
+            except RequestError as error:
+                self._count('REJECTED', error.reason)
+                deliver((error.status, error.body(), {}))
+                return
+            except SourceError as error:
+                if error.code == 'SOURCE_LOCK_BUSY':
+                    self._count('REJECTED', 'SOURCE_MAINTENANCE')
+                    deliver((503, {'error': 'source_maintenance'}, {'Retry-After': '5'}))
+                    return
+                self._count('FAILED', failure_code(error))
+                log.exception('market state Micro failed')
+                deliver((500, {'error': 'micro_query_failed', 'reason': failure_code(error)}, {}))
+                return
+            except Exception as error:
+                self._count('FAILED', failure_code(error))
+                log.exception('market state Micro failed')
+                deliver((500, {'error': 'micro_query_failed', 'reason': failure_code(error)}, {}))
+                return
+            delivered = deliver((200, payload, {}))
+            self._count('OK' if delivered else 'REJECTED', '' if delivered else 'CLIENT_DISCONNECTED')
+            if delivered:
+                with self._lock:
+                    self._token = request.trade_pin_digest
         finally:
             self.queries.release()
 
@@ -502,6 +547,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
             if self.path == '/v1/market-state/rallies':
                 api.rallies(raw, lambda reply: self._send(*reply))
+                return
+            if self.path == '/v1/market-state/micro':
+                api.micro(raw, lambda reply: self._send(*reply))
                 return
             if self.path == '/v1/market-state/access':
                 answer = api.access(raw)

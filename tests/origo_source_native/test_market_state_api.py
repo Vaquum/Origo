@@ -131,6 +131,8 @@ def test_http_contract_and_supported_caller(
     assert (status, body['error'], body['reason'], body['field']) == (400, 'invalid_request', 'unknown_field', 'x')
     status, body, _ = service.post('/v1/market-state/query', b'{')
     assert (status, body['reason']) == (400, 'invalid_json')
+    status, body, _ = service.post('/v1/market-state/micro', b'{}')
+    assert (status, body['reason']) == (400, 'invalid_micro_request')
     with pytest.raises(MarketStateError) as zone:
         query(t1='2021-01-01', url=service.url)
     assert zone.value.status == 400 and zone.value.body['reason'] == 'time_zone_required'
@@ -143,10 +145,15 @@ def test_http_contract_and_supported_caller(
     service.api.queries.acquire()
     try:
         status, body, headers = service.post('/v1/market-state/query', b'{}')
+        micro_status, micro_body, micro_headers = service.post('/v1/market-state/micro', json.dumps({
+            'from': 1792851960000, 'to': 1792851990000, 'step': 1000,
+            'as_of': 1792851990000, 'trade_pin_digest': 'a' * 64,
+        }).encode())
     finally:
         service.api.queries.release()
         service.api.queries.release()
     assert (status, body, headers['Retry-After']) == (503, {'error': 'busy'}, '5')
+    assert (micro_status, micro_body, micro_headers['Retry-After']) == (503, {'error': 'busy'}, '5')
     monkeypatch.setattr(market_state, 'FENCE_WAIT_SECONDS', 1.0)
     with source_lock(service.api.lock_root, 'binance_spot_trades', 'heavy'):
         status, body, headers = service.post('/v1/market-state/query', b'{}')

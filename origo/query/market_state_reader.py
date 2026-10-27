@@ -100,6 +100,18 @@ class MarketStateRallyResult:
     response: Mapping[str, object]
 
 
+def micro(
+    request: Mapping[str, object], *, url: str = DEFAULT_URL, timeout_seconds: float = 60.0,
+) -> Mapping[str, object]:
+    """Read bounded spot book/flow context pinned to the caller's relevant cube generations."""
+    if not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= 60:
+        raise ValueError('Micro timeout must be positive and at most 60 seconds.')
+    response = _post(url, '/v1/market-state/micro', request, timeout_seconds)
+    if response.get('schema') != 'origo-micro@1' or response.get('tradePinDigest') != request.get('trade_pin_digest'):
+        raise ValueError('Micro response schema or relevant trade pin differs from the request.')
+    return response
+
+
 def rallies(
     request: Mapping[str, object],
     *,

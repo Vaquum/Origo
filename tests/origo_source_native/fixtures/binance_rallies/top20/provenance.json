@@ -54,5 +54,10 @@
   "books": {
     "rows": 480,
     "sha256": "8b32ed4da7d5e9066389ce07fb031b97e4dffaf58911fb5f8cbf1d8982ad63a1"
+  },
+  "aggtrades": {
+    "rows": 22257,
+    "sha256": "4dd5e5d0d85dfda002300cd5a51df010d6f0bd95beb9ac76fca5bc166980f3c6",
+    "note": "Coeval original aggregate rows read from the accepted source; exact revision/build and bounds are embedded in Parquet schema provenance."
   }
 }

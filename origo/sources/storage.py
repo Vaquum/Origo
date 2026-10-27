@@ -619,6 +619,20 @@ class SourceStore:
         )
         return tuple(result[index] for index in selected)
 
+    def current_records(
+        self, start: datetime, end: datetime, *, settings: Mapping[str, object] | None = None,
+    ) -> tuple[StateRecord, ...]:
+        """Pin selected overlapping generations after resolving canonical replacement and gaps."""
+        rows = self.execute(
+            f'''SELECT partition_key, provisional, partition_start, partition_end,
+                generation, revision, build_id, component_hashes
+                FROM ({self._current_partitions_select(self.spec.key)})
+                WHERE partition_start < %(end)s AND partition_end > %(start)s
+                ORDER BY partition_start, provisional''',
+            {'start': start, 'end': end}, settings,
+        )
+        return tuple(self._state_record(row) for row in rows)
+
     def snapshot(self, *, canonical_only: bool = False) -> Snapshot:
         records = self.records(canonical_only=canonical_only)
         return Snapshot(state_token(self.spec.key, records), records)

@@ -709,7 +709,7 @@ class RenderBookProvisional:
 
     def fetch(self, partition: Partition, previous_evidence: str | None = None) -> Revision:
         entries = self.cache.entries(partition)
-        previous = object_mapping(json.loads(previous_evidence)) if previous_evidence else {}
+        previous: Mapping[str, object] = object_mapping(json.loads(previous_evidence)) if previous_evidence else {}
         closed = previous.get('closure')
         if (closed is not None and previous.get('partition') == partition.key
                 and previous.get('market') == self.cache.market

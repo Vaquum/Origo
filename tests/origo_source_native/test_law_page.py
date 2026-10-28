@@ -557,7 +557,9 @@ def test_browser_recovery_pagination_and_history_lru(
         browser.close()
 
 
-def test_gate_index_latest_first_two_pages_and_partial_startup(tape: tuple[Path, page.Document, datetime]) -> None:
+def test_gate_index_latest_first_two_pages_and_partial_startup(
+    tape: tuple[Path, page.Document, datetime], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root, report, now = tape
     gate = 'law.R1:binance_spot_trades'
     original = next(event for event in page._objects(report['gates']) if event['gate_id'] == gate)
@@ -581,27 +583,39 @@ def test_gate_index_latest_first_two_pages_and_partial_startup(tape: tuple[Path,
     assert partial['events'] == [] and partial['loading'] is True
     while cache.loading:
         cache.advance(now, budget_seconds=1)
-    first = cache.history(query, now)
+    def history(owner: page.TapeCache, request: dict[str, list[str]]) -> page.Document:
+        # Qualify page size independently of the real deadline/resource owner.
+        with monkeypatch.context() as scoped:
+            scoped.setattr(page, 'time', SimpleNamespace(monotonic=lambda: 0.0))
+            return owner.history(request, now)
+    first = history(cache, query)
     events = page._objects(first['events'])
     assert len(events) == 1000 and first['loading'] is False
     assert events[0]['evaluated_at'] == (end-timedelta(seconds=55)).isoformat()
-    second = cache.history({**query, 'cursor': [str(first['next_cursor'])]}, now)
+    second = history(cache, {**query, 'cursor': [str(first['next_cursor'])]})
     assert len(page._objects(second['events'])) == 440 and second['next_cursor'] is None
     assert len({str(event['evidence_id']) for event in events+page._objects(second['events'])}) == 1440
+    ticks = iter((0.0, 0.0))
+    with monkeypatch.context() as scoped:
+        scoped.setattr(page, 'time', SimpleNamespace(monotonic=lambda: next(ticks, 1.0)))
+        bounded = cache.history(query, now)
+    assert bounded['events'] == events[:1] and bounded['next_cursor'] is not None
+    continuation = history(cache, {**query, 'cursor': [str(bounded['next_cursor'])]})
+    assert page._objects(continuation['events'])[:999] == events[1:]
     # A late original-time import and a repeated delivery do not shift or duplicate the cursor.
     late = {**original, 'evaluated_at': (start+timedelta(minutes=10, seconds=5)).isoformat(),
         'evidence_id': 'late-protocol-envelope'}
     with (root / f'gate-events-{start.date().isoformat()}.jsonl').open('a') as stream:
         stream.write(json.dumps(late)+'\n'+json.dumps(late)+'\n')
     cache.advance(now, budget_seconds=1)
-    resumed = cache.history({**query, 'cursor': [str(first['next_cursor'])]}, now)
+    resumed = history(cache, {**query, 'cursor': [str(first['next_cursor'])]})
     assert len(page._objects(resumed['events'])) == 441
     assert sum(event['evidence_id'] == late['evidence_id'] for event in page._objects(resumed['events'])) == 1
     restarted = page.TapeCache(root)
     restarted.refresh_latest(now)
     while restarted.loading:
         restarted.advance(now, budget_seconds=1)
-    assert restarted.history(query, now)['events'] == events
+    assert history(restarted, query)['events'] == events
 
 
 def test_browser_age_expires_during_held_fetch(

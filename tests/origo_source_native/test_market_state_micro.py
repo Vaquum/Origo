@@ -149,9 +149,11 @@ def test_micro_native_arithmetic_clocks_gaps_grouping_and_generation_fence(
                 & (pl.col('observed_at_us') < request.as_of * 1000))
             if eligible.is_empty():
                 assert row['book'] is None
+                assert row['coveredMs']['book'] == 0
                 continue
             sample = cast(dict[str, object], row['book'])
             assert sample['seconds'] == 1
+            assert row['coveredMs']['book'] == 1000
             assert int(str(sample['observedAtUs'])) < request.as_of * 1000
             genuine = books.filter(pl.col('exchange_time_us') == sample['exchangeTimeUs']).row(0, named=True)
             mid = (genuine['bids'][0]['1'] + genuine['asks'][0]['1']) / 2
@@ -162,9 +164,11 @@ def test_micro_native_arithmetic_clocks_gaps_grouping_and_generation_fence(
         # A receipt after the replay edge must not leak the ending snapshot.
         early = read_micro(client, 'origo', tmp_path, MicroRequest(start, start + 1000, 1000, start + 1000, digest))
         assert cast(list[dict[str, object]], early['bins'])[0]['book'] is None
+        assert cast(list[dict[str, object]], early['bins'])[0]['coveredMs'] == {'book': 0, 'trades': 1000, 'groups': 1000}
         # Genuine out-of-excerpt book gaps stay absent, although a partition envelope exists.
         gap = read_micro(client, 'origo', tmp_path, MicroRequest(start + 600_000, start + 630_000, 1000, start + 630_000, digest))
-        assert all(row['book'] is None for row in cast(list[dict[str, object]], gap['bins']))
+        assert all(row['book'] is None and row['coveredMs']['book'] == 0
+                   for row in cast(list[dict[str, object]], gap['bins']))
         unavailable = read_micro(client, 'origo', tmp_path, MicroRequest(0, 30_000, 1000, 30_000, trade_digest(())))
         assert all(row['flow'] is None and row['groups'] is None and row['book'] is None
                    for row in cast(list[dict[str, object]], unavailable['bins']))
@@ -196,6 +200,7 @@ def test_micro_native_arithmetic_clocks_gaps_grouping_and_generation_fence(
         amounts = [amount for row in observed.iter_rows(named=True) if (amount := near(row)) is not None]
         measured_book = cast(dict[str, object], cast(list[dict[str, object]], overview['bins'])[0]['book'])
         assert measured_book['nearSeconds'] == len(amounts)
+        assert cast(list[dict[str, object]], overview['bins'])[0]['coveredMs']['book'] == observed.height * 1000
         for index, name in enumerate(('meanBid', 'meanAsk')):
             assert measured_book[name] == pytest.approx(math.fsum(a[index] for a in amounts) / len(amounts), rel=1e-12, abs=1e-6)
         assert measured_book['firstExchangeTimeUs'] == observed['exchange_time_us'][0]

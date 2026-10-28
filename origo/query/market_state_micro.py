@@ -330,8 +330,10 @@ def read_micro(
         for index, at in enumerate(range(request.start, request.end, request.step)):
             end = at + request.step
             coverage = {name: values[index] for name, values in coverage_bins.items()}
+            book = book_rows.get(index)
+            coverage['book'] = int(str(book['seconds'])) * 1000 if book else 0
             bins.append({
-                'at': at, 'until': end, 'book': book_rows.get(index),
+                'at': at, 'until': end, 'book': book,
                 'flow': flows.get(index, {'buy': 0.0, 'sell': 0.0, 'count': 0, 'buyVwap': None, 'sellVwap': None}) if coverage['trades'] == request.step else None,
                 'groups': grouping.get(index, {'buy': 0.0, 'sell': 0.0, 'count': 0, 'meanNotional': None, 'maxNotional': None}) if coverage['groups'] == request.step else None,
                 'coveredMs': coverage,

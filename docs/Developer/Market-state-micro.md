@@ -34,7 +34,10 @@ build and coverage interval separately for `trades`, `groups` and `book`.
 `bins` contains one item per requested interval:
 
 - `at`, `until`: exclusive-upper interval edges, milliseconds.
-- `coveredMs`: accepted interval coverage for each source. Incomplete trade or
+- `coveredMs`: accepted interval coverage for trades and groups; for books,
+  the number of eligible observed exchange seconds multiplied by 1000. Receipt
+  filtering can therefore reduce book coverage to zero in an accepted minute.
+  Incomplete trade or
   grouping coverage makes its corresponding object null, including a missing
   source; it never becomes measured zero.
 - `book`: interval statistics and the **last eligible observation**. It contains

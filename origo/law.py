@@ -123,6 +123,8 @@ class _Proof:
     build: str
     hashes: dict[str, str]
     components: tuple[tuple[str, int, str, datetime], ...]
+    second_masks: tuple[int, ...] = ()
+    coverage_verified: bool = False
 
     @classmethod
     def read(cls, row: Row, source: str) -> _Proof:
@@ -144,7 +146,7 @@ class _Proof:
         return cls(source, str(row[0]), bool(row[1]), _utc(row[2]), _utc(row[3]), str(row[4]),
                    str(row[5]), hashes, tuple(
                        (str(p[0]), int(str(p[1])), str(p[2]), _utc(p[3])) for p in proofs
-                   ))
+                   ), tuple(int(str(mask)) for mask in cast(list[object], row[8])), bool(row[9]))
 
     def component(self, key: str) -> tuple[str, int, str, datetime] | None:
         matches = [item for item in self.components if item[0] == key]
@@ -166,17 +168,33 @@ class _Proof:
         raw = self.component(('depth20' if grid else 'raw') + ('_latest' if self.provisional else ''))
         if raw is None:
             raise ValueError('Validated proof lost its raw component.')
+        minutes = int((self.end - self.start).total_seconds() // 60)
         if grid:
-            minutes = (self.end - self.start).total_seconds() / 60
+            if self.second_masks and (not self.coverage_verified or len(self.second_masks) != minutes
+                                      or any(mask < 0 or mask >= 1 << 60 for mask in self.second_masks)):
+                return _result('UNKNOWN', 'book_coverage_invalid')
+            counts = {'depth20': sum(mask.bit_count() for mask in self.second_masks),
+                      'depth20_1m': sum(bool(mask) for mask in self.second_masks)}
             for key, count in grid:
                 component = self.component(key + ('_latest' if self.provisional else ''))
-                if component is None or component[1] != minutes * count:
-                    return _result('FAIL', 'book_component_grid_incomplete', component=key, expected_rows=int(minutes * count), actual_rows=component[1] if component else None)
+                expected_count = counts[key] if self.second_masks else minutes * count
+                if component is None or component[1] != expected_count:
+                    return _result('FAIL', 'book_component_grid_incomplete', component=key, expected_rows=expected_count, actual_rows=component[1] if component else None)
         empty = next((item[0] for item in self.components if item[0] in expected and item[1] == 0), None)
         if raw[1] > 0 and empty is not None:
             return _result('FAIL', 'component_proof_empty', empty_component=empty, raw_proof_rows=raw[1])
-        return _result('PASS' if raw[1] > 0 else 'FAIL', 'active_proof' if raw[1] else 'raw_proof_empty',
-                       raw_proof_rows=raw[1], **{f'hash_{key}': value for key, value in self.hashes.items() if key in expected})
+        observed = raw[1] > 0 or bool(grid and self.second_masks and self.coverage_verified)
+        coverage: dict[str, Scalar] = ({'expected_seconds': minutes * 60,
+                                      'observed_seconds': raw[1], 'missing_seconds': minutes * 60 - raw[1]}
+                                     if grid else {})
+        if self.second_masks:
+            missing = next((index * 60 + second for index, mask in enumerate(self.second_masks)
+                            for second in range(60) if not mask & (1 << second)), None)
+            coverage['first_missing_second'] = (self.start + timedelta(seconds=missing)).isoformat() if missing is not None else None
+            coverage['observed_second_masks_hex'] = ','.join(f'{mask:015x}' for mask in self.second_masks)
+        return _result('PASS' if observed else 'FAIL', 'active_proof' if observed else 'raw_proof_empty',
+                       raw_proof_rows=raw[1], **coverage,
+                       **{f'hash_{key}': value for key, value in self.hashes.items() if key in expected})
 
 
 def _proofs(query: _Queries, database: str, source: str, build: str,
@@ -186,11 +204,17 @@ def _proofs(query: _Queries, database: str, source: str, build: str,
         selected += ' OR partition_start>=%(tail)s'
     selected += ')'
     component_selected = selected.replace('partition_start>=%(tail)s', 'partition_key>=%(tail_key)s')
+    masks = ("anyIf(JSONExtract(evidence_json, 'second_masks', 'Array(UInt64)'), component IN ('depth20','depth20_latest'))"
+             if source in BOOK_MINUTE_GRIDS else "CAST([], 'Array(UInt64)')")
+    verified = ("anyIf(revision=concat('render-top20-v1:', lower(hex(SHA256(evidence_json)))) "
+                "AND JSONHas(evidence_json, 'closure'), component IN ('depth20','depth20_latest'))"
+                if source in BOOK_MINUTE_GRIDS else '0')
     rows = query(f"""SELECT a.partition_key, a.provisional, a.partition_start, a.partition_end,
-        a.revision, a.build_id, a.component_hashes, p.proofs
+        a.revision, a.build_id, a.component_hashes, p.proofs, p.second_masks, p.coverage_verified
         FROM {database}.source_active_partitions a LEFT JOIN (
             SELECT source_key, partition_key, provisional, revision, build_id,
-                groupArray((component, row_count, content_hash, completed_at)) AS proofs
+                groupArray((component, row_count, content_hash, completed_at)) AS proofs,
+                {masks} AS second_masks, {verified} AS coverage_verified
             FROM {database}.source_component_log
             WHERE source_key=%(source)s AND {component_selected}
             GROUP BY source_key, partition_key, provisional, revision, build_id
@@ -236,10 +260,12 @@ def _r1(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetim
     grid = BOOK_MINUTE_GRIDS.get(spec.key)
     keys = tuple(key for key, _ in grid) if grid else ('raw',)
     counts: dict[str, int] = {}
+    observed_mask = 0
     for component_key in keys:
         raw = next(component for component in spec.components
                    if component.key == component_key + ('_latest' if provisional else ''))
-        rows = query(f"""SELECT count() FROM {database}.{identifier(spec.names.prefix)}_{identifier(raw.key)}_revisions
+        mask_sql = ', groupBitOr(bitShiftLeft(toUInt64(1), toSecond(datetime))), max(exchange_time_us)' if grid and component_key == 'depth20' else ''
+        rows = query(f"""SELECT count(){mask_sql} FROM {database}.{identifier(spec.names.prefix)}_{identifier(raw.key)}_revisions
             WHERE source_date=%(date)s AND partition_key=%(key)s AND revision=%(revision)s
               AND build_id=%(build)s AND {identifier(raw.time_column)}>=%(minute)s
               AND {identifier(raw.time_column)}<%(end)s""", {
@@ -247,13 +273,28 @@ def _r1(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetim
             'minute': _utc(minute), 'end': _utc(minute) + timedelta(minutes=1),
         })
         counts[component_key] = int(str(rows[0][0]))
+        if grid and component_key == 'depth20':
+            observed_mask = int(str(rows[0][1]))
+            if counts[component_key]:
+                observed = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(microseconds=int(str(rows[0][2])))
+                evidence.update(last_exchange_time=observed.isoformat(),
+                                age_seconds=max(0.0, (now - observed).total_seconds()))
         if grid:
             evidence['rows_' + component_key] = counts[component_key]
     evidence['row_count'] = counts[keys[0]]
     if grid:
+        index = int((_utc(minute) - selected[0].start).total_seconds() // 60)
+        expected_mask = selected[0].second_masks[index] if selected[0].second_masks else (1 << 60) - 1
+        evidence.update(expected_seconds=60, observed_seconds=counts['depth20'],
+                        missing_seconds=60 - counts['depth20'])
+        if observed_mask != expected_mask or counts['depth20'] != observed_mask.bit_count():
+            return _result('FAIL', 'reader_book_grid_incomplete', component='depth20', **evidence)
         for component_key, expected in grid:
+            expected = expected_mask.bit_count() if component_key == 'depth20' else int(bool(expected_mask))
             if counts[component_key] != expected:
                 return _result('FAIL', 'reader_book_grid_incomplete', component=component_key, **evidence)
+        if not counts['depth20']:
+            return _result('FAIL', 'reader_minute_empty', **evidence)
     elif not evidence['row_count']:
         return _result('FAIL', 'reader_minute_empty', **evidence)
     if grid:
@@ -267,7 +308,7 @@ def _r1(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetim
                         covered_minutes=len(accepted), missing_minutes=expected_minutes - len(accepted))
         if len(accepted) != expected_minutes:
             return _result('FAIL', 'reader_book_minutes_missing', **evidence)
-    stale = (now - _utc(end)).total_seconds() > budget
+    stale = float(str(evidence['age_seconds'])) > budget
     return _result('FAIL' if stale else 'PASS', 'reader_stale' if stale else 'reader_current', **evidence)
 
 
@@ -338,6 +379,8 @@ def _c2(query: _Queries, database: str, proofs: list[_Proof], source: str, now: 
     if stored != start:
         return _result('UNKNOWN', 'anchor_mismatch', **evidence)
     valid = 0
+    missing_seconds = 0
+    first_gap: str | None = None
     first: PredicateReport | None = None
     by_slot: dict[datetime, list[_Proof]] = {}
     for proof in proofs:
@@ -348,6 +391,13 @@ def _c2(query: _Queries, database: str, proofs: list[_Proof], source: str, now: 
         result = _calendar(by_slot.get(slot, []), slot, source)
         if result['status'] == 'PASS':
             valid += 1
+            if hourly:
+                missing = int(str(result['evidence'].get('missing_seconds', 0)))
+                missing_seconds += missing
+                if missing and first_gap is None:
+                    first_gap = slot.strftime('%Y-%m-%dT%HZ')
+                    evidence.update(first_missing_second=result['evidence'].get('first_missing_second'),
+                                    first_gap_observed_second_masks_hex=result['evidence'].get('observed_second_masks_hex'))
         elif first is None:
             first = result
             evidence[f'first_invalid_{unit}'] = slot.strftime('%Y-%m-%dT%HZ') if hourly else slot.date().isoformat()
@@ -356,6 +406,7 @@ def _c2(query: _Queries, database: str, proofs: list[_Proof], source: str, now: 
     evidence[f'valid_{unit}s'] = valid
     if hourly:
         evidence['missing_hours'] = expected - valid
+        evidence.update(missing_seconds=missing_seconds, first_gap_hour=first_gap)
     return _result(first['status'] if first else 'PASS', first['reason'] if first else 'canonical_calendar_complete', **evidence)
 
 

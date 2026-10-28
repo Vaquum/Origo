@@ -802,10 +802,10 @@ def build_catalog(deployed_sha: str) -> LawCatalog:
                 ('segment_integrity', 'RenderBookCache.validate_segment',
                  'Immutable payloads must match identity, schema, timestamp units, count, bytes and SHA256.', {}),
                 ('sample_grid', 'RenderBookCache.revision',
-                 'Every minute/hour requires actual observations for every exchange second; no carry-forward.',
+                 'Only actual observed seconds are retained. Missing seconds close after both historical imports cross the five-minute cutoff, with exact coverage masks; no carry-forward.',
                  {'depth20_samples': 60, 'canonical_seconds': 3600}),
                 ('hour_pin', 'RenderBookCanonical.fetch',
-                 'End plus five minutes pins complete eligible originals; an accepted pin remains immutable.',
+                 'End plus five minutes pins eligible originals and verified gap coverage; an accepted pin remains immutable.',
                  {'finality_delay_seconds': 300}),
                 ('cache_bound', 'RenderBookCache._usage',
                  'Unreclaimed replica input is bounded; accepted database proofs precede payload cleanup.',
@@ -963,17 +963,17 @@ def _operational_gates(add: _AddGate) -> None:
         for predicate, condition, thresholds in (
             (
                 'R1',
-                'Reader age must be within budget and the selected fully closed covered minute must contain every required book grid.' if book else 'Reader age must be within budget and the selected fully closed covered minute must contain active raw rows.',
+                'Reader age must be within budget and physical book rows must match the accepted observed-second coverage, with at least one current observation.' if book else 'Reader age must be within budget and the selected fully closed covered minute must contain active raw rows.',
                 {'budget_seconds': _threshold(f'law:R1_{market}_BUDGET_SECONDS')},
             ),
             (
                 'C1',
-                'The latest UTC hour due at hour end plus five minutes must have complete validated canonical proofs.' if hourly else 'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
+                'The latest UTC hour due at hour end plus five minutes must have validated canonical proofs matching observed seconds and explicitly closed gaps.' if hourly else 'Yesterday must have complete validated canonical proofs; absence is NOT_DUE before deadline and FAIL afterward.',
                 {'delay_seconds': 300} if hourly else {'deadline_utc': f'{deadline[0]:02}:{deadline[1]:02}'},
             ),
             (
                 'C2',
-                'The frozen anchor through the hour before the latest due hour must contain every distinct canonical hour and active component proof.' if hourly else 'The frozen anchor through day-before-yesterday must contain every distinct canonical day and active component proof.',
+                'The frozen anchor through the hour before the latest due hour must contain every distinct finalized canonical hour and valid component proof; recorded missing seconds are counted separately.' if hourly else 'The frozen anchor through day-before-yesterday must contain every distinct canonical day and active component proof.',
                 {'anchor': str(anchors[spec.key])},
             ),
         ):

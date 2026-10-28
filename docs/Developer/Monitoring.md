@@ -277,10 +277,34 @@ are180/300seconds. Missing daily trade archives are NOT_DUE before04:30/10:30UTC
 Historical reports retain D1 and the retired native book descriptors; current
 inventory contains only the four trade sources and two qualified top20 sources.
 Enabled `binance_spot_top20_v1` and `binance_perp_top20_v1` use the same reader
-laws with60snapshots/one metric row per minute. C1 requires the latest UTC hour
-due at hour end plus five minutes, with3600actual observations and60minute
-metrics. C2 checks every older hour from2026-10-24T13:00Z. A common missing
-second remains a failed hour; no carried observation supplies coverage.
+laws with up to60actual snapshots and one last-observed-quote metric per nonempty
+minute. A partial or empty interval closes only after both historical imports have
+crossed its beginning and end plus five minutes. Tail downloads and expired cursor
+jumps cannot establish that coverage. Its original input evidence binds an exact
+60-bit observed-second mask per minute, both import witnesses and the selected
+bytes; absent seconds remain absent. An accepted minute leaves the retry candidates.
+C1 requires the latest due UTC hour's validated canonical proofs. C2 checks every
+older finalized hour from2026-10-24T13:00Z and reports recorded missing seconds
+separately. Neither predicate treats a verified closed gap as an unprocessed hour.
+Missing/invalid proofs and physical rows that disagree with the masks still fail;
+R1 still requires an actual current observation within its freshness budget.
+Micro reports actual observed book milliseconds independently of trade coverage.
+Arrow retains sparse original rows and reports expected/missing seconds in its
+manifest. No interpolation, carry-forward, zero-valued book or new clock fills a gap.
+R1 measures book age from the genuine last exchange clock, including trailing
+missing seconds, and fails on an empty current minute. C1/C2 may pass a finalized
+empty interval; its metric is absent. A current empty Arrow file is a valid delivered
+artifact, with zero rows and explicit missing coverage. Its `active_through` is the
+processed interval boundary; quote clocks remain in the actual rows. Publication
+currency measures delivery against selected inputs, while R1 judges live observations.
+The existing deployment readiness check deliberately still requires a recent full
+60-second minute and metric; accepting a historical gap does not relax rollout readiness.
+Exact gap evidence is in the monitor's existing raw law reports and C1/C2 gate events,
+served by `/law.json` and `/law/history.json` and linked from Dagit's monitor
+checks. Browser evidence uses comma-separated, fixed-width 15-digit hexadecimal
+observed-second masks, earliest minute first and bit0 representing second0. This
+preserves all60bits; internal revision evidence retains UInt64 numeric masks and
+its SHA-256 binding. Notification-frame measurement allowlists are unchanged.
 Sources lists canonical and provisional depth20 and minute metrics,
 with activation hash, build identity and data-through evidence. Recovery displays
 hourly book and daily trade canonical readiness and calendar coverage.

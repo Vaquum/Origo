@@ -149,7 +149,7 @@ class NotificationTransition(TypedDict):
 LAW_NAMES: dict[str, str] = {
     'R1': 'Live source data is fresh',
     'C1': 'Authoritative archives are ready',
-    'C2': 'Historical coverage is complete',
+    'C2': 'Historical coverage is accounted for',
     'D1': 'Depth minutes are complete',
     'M1': 'Market state cube is fresh',
     'M2': 'Market state history is complete',
@@ -157,7 +157,7 @@ LAW_NAMES: dict[str, str] = {
 LAW_COPY: dict[str, str] = {
     'R1': 'Checks the selected reader frontier and actual rows in its closed minute.',
     'C1': 'Checks daily archive deadlines and hourly provider availability, activation and original reader proofs.',
-    'C2': 'Checks the historical calendar and anchor using canonical proofs, not a physical full-history scan.',
+    'C2': 'Checks finalized historical partitions and anchor proofs. Recorded book gaps remain explicit; finalized does not mean gap-free.',
     'D1': 'Counts distinct depth minutes in the checked rolling day, with the recorded grace and missing-minute allowance.',
     'M1': 'Checks activated cube evidence and matching trade and taker-buy counts in the selected reader window.',
     'M2': 'Checks activated market state proofs for every due canonical day from 2021-01-01. Missing migration coverage remains visible.',
@@ -354,6 +354,14 @@ def _cards(current: Document, catalog: Document, coverage: Coverage) -> list[Sum
             value = (f'{_shown(sum(cast(list[float], expected)) - sum(cast(list[float], missing)))} / {_shown(sum(cast(list[float], expected)))}'
                      if values and None not in missing and None not in expected else 'Unknown / incomplete')
             reason = ' · '.join(f"{str(sources.get(key.split(':', 1)[1], {}).get('name') or key.split(':', 1)[1]).replace('_', ' ')}: {_shown(item.get('missing_slots'))} gaps" for key, item in zip(members, values)) or 'Depth evidence unavailable'
+        if family in ('R1', 'C1', 'C2'):
+            gaps = 0.0
+            for item in values:
+                missing_seconds = _number(item.get('missing_seconds'))
+                if missing_seconds is not None:
+                    gaps += missing_seconds
+            if gaps:
+                reason += f' · {_shown(gaps)} recorded missing book seconds'
         cards.append(_card(family, title, value, _rollup(states), reason + '. ' + LAW_COPY[family], coverage,
                            unit='minutes' if family == 'D1' else 'members'))
     def evidence(check: str) -> Document:

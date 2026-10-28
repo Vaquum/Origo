@@ -1,0 +1,27 @@
+{
+  "captured_from": "Original immutable Render A/B segment cache on Origo; read-only SSH copy, 2026-10-28",
+  "exchange_hour": "2026-10-28T09Z",
+  "observed_seconds": 3598,
+  "missing_seconds": [
+    "2026-10-28T09:21:52Z",
+    "2026-10-28T09:21:53Z"
+  ],
+  "files": [
+    {
+      "file": "perp-A.tar.gz",
+      "replica": "A",
+      "market": "perp",
+      "sha256": "c675ddf05513026413b58891fc92114f582f40ab6eba7055ae933ec306e00d45",
+      "bytes": 448845
+    },
+    {
+      "file": "perp-B.tar.gz",
+      "replica": "B",
+      "market": "perp",
+      "sha256": "9187af632340aa82cad2803a2f92a900a094f48684dd9440e6700b88aff4f536",
+      "bytes": 448643
+    }
+  ],
+  "arrival_cutoff": "2026-10-28T10:05:00Z",
+  "capture_scope": "Every retained A/B arrival segment for 09:00 through the first segment sealed at or after 10:05 UTC; original bytes and manifests unchanged."
+}

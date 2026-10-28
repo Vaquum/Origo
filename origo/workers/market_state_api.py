@@ -36,7 +36,7 @@ from uuid import uuid4
 
 from origo.assets.create_origo_database import get_clickhouse_settings, make_clickhouse_client
 from origo.query.market_state import Request, RequestError, iso, parse_request, write_result
-from origo.query.market_state_micro import parse_micro_request, read_micro
+from origo.query.market_state_micro import MicroCache, parse_micro_request, read_micro
 from origo.query.market_state_rallies import (
     RALLY_DEADLINE_SECONDS,
     RallyDiscoveryRequest,
@@ -109,6 +109,7 @@ class MarketStateApi:
         self.store, self.reporter, self.lock_root, self.port = store, reporter, lock_root, port
         self.queries = threading.BoundedSemaphore(MAX_CONCURRENT_QUERIES)
         self.rally_queries = threading.BoundedSemaphore(1)
+        self.micro_cache = MicroCache()
         self._rally_outcomes: Counter[Status] = Counter()
         self._rally_input_bytes = 0
         self._rally_output_bytes = 0
@@ -170,7 +171,7 @@ class MarketStateApi:
             try:
                 runtime, client = _runtime(self.lock_root)
                 try:
-                    payload = read_micro(client, runtime.store.database, self.lock_root, request)
+                    payload = read_micro(client, runtime.store.database, self.lock_root, request, cache=self.micro_cache)
                 finally:
                     client.disconnect()
             except RequestError as error:

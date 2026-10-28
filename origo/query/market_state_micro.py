@@ -5,6 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
+from bisect import bisect_left
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -25,6 +28,8 @@ NEAR_BPS = 0.1
 MAX_REPLY = 4 * 1024 * 1024
 MAX_BINS = 4096
 MAX_SPAN = 31 * 86400_000
+NORMAL_WINDOW = 3600_000
+NORMAL_SECONDS = 1800
 SETTINGS: Mapping[str, object] = {
     'max_threads': 2, 'max_memory_usage': 2 * 1024**3,
     'max_execution_time': 10, 'max_rows_to_read': 5_000_000,
@@ -50,6 +55,34 @@ class MicroRequest:
     @property
     def detail(self) -> bool:
         return self.step == 1000
+
+
+class MicroCache:
+    """Bounded request results, reused only after all contributing generations are pinned."""
+
+    def __init__(self) -> None:
+        self.answers: OrderedDict[tuple[MicroRequest, tuple[str, ...]], tuple[str, dict[str, object]]] = OrderedDict()
+        self.lock = threading.Lock()
+
+    def get(self, request: MicroRequest, version: str) -> dict[str, object] | None:
+        with self.lock:
+            for key, (held_version, answer) in self.answers.items():
+                if key[0] == request and held_version == version:
+                    self.answers.move_to_end(key)
+                    return answer
+            return None
+
+    def get_pinned(self, key: tuple[MicroRequest, tuple[str, ...]]) -> dict[str, object] | None:
+        with self.lock:
+            held = self.answers.get(key)
+            return held[1] if held is not None else None
+
+    def put(self, key: tuple[MicroRequest, tuple[str, ...]], version: str, answer: dict[str, object]) -> None:
+        with self.lock:
+            self.answers[key] = (version, answer)
+            self.answers.move_to_end(key)
+            while len(self.answers) > 8:
+                self.answers.popitem(last=False)
 
 
 def parse_micro_request(raw: bytes) -> MicroRequest:
@@ -110,7 +143,7 @@ class _Pinned:
     records: tuple[StateRecord, ...]
 
     def union(self, component: str, fields: str, request: MicroRequest, *, book: bool = False) -> tuple[str, dict[str, object]]:
-        low = request.start - (1000 if book and request.detail else 0)
+        low = request.start - (1000 if request.detail else NORMAL_WINDOW) if book else request.start
         bindings: dict[str, object] = {
             'low': low, 'high': request.end, 'as_of': request.as_of,
             'first': (EPOCH + timedelta(milliseconds=low)).date(),
@@ -164,12 +197,36 @@ def _book(pinned: _Pinned, request: MicroRequest) -> dict[int, dict[str, object]
             arraySum(arrayMap(l -> if(l.1 <= mid * (1 + 0.00001), l.1 * l.2, 0), asks)) AS ask,
             (mid - bids[-1].1) / mid * 10000 AS bid_reach,
             (asks[-1].1 - mid) / mid * 10000 AS ask_reach,
-            (asks[1].1 - bids[1].1) / mid * 10000 AS spread
+            (asks[1].1 - bids[1].1) / mid * 10000 AS spread,
+            intDiv(exchange_time_us, 1000000) AS second,
+            tuple(exchange_time_us, observed_at_us, mid, bid, ask, bid_reach, ask_reach, spread) AS sample
         FROM samples
-    ) SELECT toInt64(intDiv(exchange_time_us, %(step)s * 1000)) - toInt64(intDiv(%(start)s, %(step)s)) AS bin,
-        uniqExact(intDiv(exchange_time_us, 1000000)),
-        argMax(tuple(exchange_time_us, observed_at_us, mid, bid, ask, bid_reach, ask_reach, spread), exchange_time_us)
-        FROM measured GROUP BY bin ORDER BY bin''', params)
+    ), periods AS (
+        SELECT intDiv(second, intDiv(least(%(step)s, 60000), 1000)) * least(%(step)s, 60000) AS at,
+            count() AS seconds, argMin(sample, second) AS first, argMax(sample, second) AS last,
+            sumKahanIf(sample.4, sample.6 >= 0.1 AND sample.7 >= 0.1) AS bid_sum,
+            sumKahanIf(sample.5, sample.6 >= 0.1 AND sample.7 >= 0.1) AS ask_sum,
+            countIf(sample.6 >= 0.1 AND sample.7 >= 0.1) AS near_seconds,
+            sumKahanIf(sample.4 + sample.5, sample.6 >= 0.1 AND sample.7 >= 0.1
+                AND sample.2 < (intDiv(second, 60) + 1) * 60000000) AS normal_sum,
+            countIf(sample.6 >= 0.1 AND sample.7 >= 0.1
+                AND sample.2 < (intDiv(second, 60) + 1) * 60000000) AS normal_seconds,
+            sumKahan(sample.8) AS spread_sum, max(sample.2) AS last_receipt
+        FROM measured GROUP BY at
+    ) SELECT toInt64(intDiv(at, %(step)s)) - toInt64(intDiv(%(start)s, %(step)s)) AS bin,
+        sum(seconds), argMax(last, at), sumKahan(bid_sum), sumKahan(ask_sum), sum(near_seconds),
+        argMin(first, at), sumKahan(spread_sum) / sum(seconds),
+        groupArray(tuple(at, normal_sum, normal_seconds)), max(last_receipt)
+        FROM periods GROUP BY bin ORDER BY bin''', params)
+    history = sorted(
+        (int(str(period[0])), float(str(period[1])), int(str(period[2])))
+        for row in rows for period in cast(list[tuple[object, ...]], row[8])
+    )
+    times = [period[0] for period in history]
+    sums, counts = [0.0], [0]
+    for _at, amount, count in history:
+        sums.append(sums[-1] + amount)
+        counts.append(counts[-1] + count)
     result: dict[int, dict[str, object]] = {}
     for row in rows:
         if not isinstance(row[2], tuple):
@@ -178,11 +235,24 @@ def _book(pinned: _Pinned, request: MicroRequest) -> dict[int, dict[str, object]
         if len(sample) != 8:
             raise TypeError('Invalid book sample.')
         exchange, receipt, mid, bid, ask, bid_reach, ask_reach, spread = sample
-        result[int(str(row[0]))] = {
+        index = int(str(row[0]))
+        at = request.start + index * request.step
+        low, high = bisect_left(times, at - NORMAL_WINDOW), bisect_left(times, at)
+        normal_seconds = counts[high] - counts[low] if not request.detail else 0
+        near_seconds = int(str(row[5]))
+        first = cast(tuple[object, ...], row[6])
+        result[index] = {
             'seconds': row[1], 'exchangeTimeUs': exchange, 'observedAtUs': receipt, 'mid': mid,
             'bid': bid if float(str(bid_reach)) >= NEAR_BPS else None,
             'ask': ask if float(str(ask_reach)) >= NEAR_BPS else None,
             'bidReachBps': bid_reach, 'askReachBps': ask_reach, 'spreadBps': spread,
+            'meanBid': float(str(row[3])) / near_seconds if near_seconds else None,
+            'meanAsk': float(str(row[4])) / near_seconds if near_seconds else None,
+            'nearSeconds': near_seconds, 'meanSpreadBps': row[7],
+            'firstMid': first[2], 'firstExchangeTimeUs': first[0], 'firstObservedAtUs': first[1],
+            'normalDepth': (sums[high] - sums[low]) / normal_seconds if normal_seconds >= NORMAL_SECONDS else None,
+            'normalSeconds': normal_seconds,
+            'maxObservedAtUs': row[9],
         }
     return result
 
@@ -217,22 +287,43 @@ def _flow(pinned: _Pinned, request: MicroRequest, *, groups: bool = False) -> di
     return result
 
 
-def read_micro(client: Client, database: str, lock_root: Path, request: MicroRequest) -> dict[str, object]:
+def read_micro(
+    client: Client, database: str, lock_root: Path, request: MicroRequest, *, cache: MicroCache | None = None,
+) -> dict[str, object]:
     """Read immutable accepted generations under the existing source cleanup fences."""
     bounded = _Bounded(client)
     with ExitStack() as locks:
         for spec in sorted(SPECS, key=lambda source: source.key):
             locks.enter_context(source_lock(lock_root, spec.key, 'heavy', shared=True))
-        pinned: list[_Pinned] = []
-        for spec in SPECS:
-            store = SourceStore(bounded, database, spec)
-            low = request.start - (1000 if request.detail and spec == BINANCE_SPOT_TOP20_SPEC else 0)
-            records = store.current_records(EPOCH + timedelta(milliseconds=low), EPOCH + timedelta(milliseconds=request.end))
-            pinned.append(_Pinned(store, records))
+        version = ''
+        if cache is not None:
+            # Activations are append-only. Any new activation or reclaimed generation
+            # changes this watermark; immutable anchors participate in selection too.
+            catalog = SourceStore(bounded, database, SPECS[0])
+            rows = bounded.execute(f'''SELECT a.source_key, count(), max(toString(a.activated_at)),
+                max(toString(n.anchor)) FROM {catalog.table('source_activation_log')} a
+                INNER JOIN {catalog.table('source_anchor_log')} n ON a.source_key=n.source_key
+                WHERE a.source_key IN %(sources)s GROUP BY a.source_key ORDER BY a.source_key''',
+                {'sources': tuple(spec.key for spec in SPECS)})
+            version = hashlib.sha256(json.dumps(rows, separators=(',', ':')).encode()).hexdigest()
+            held = cache.get(request, version)
+            if held is not None:
+                return held
+        catalog = SourceStore(bounded, database, SPECS[0])
+        starts = {spec.key: EPOCH + timedelta(milliseconds=request.start) for spec in SPECS}
+        starts[BINANCE_SPOT_TOP20_SPEC.key] -= timedelta(milliseconds=1000 if request.detail else NORMAL_WINDOW)
+        records = catalog.current_records_by_source(starts, EPOCH + timedelta(milliseconds=request.end))
+        pinned = [_Pinned(SourceStore(bounded, database, spec), records[spec.key]) for spec in SPECS]
         trades, aggregates, books = pinned
         digest = trade_digest(trades.records)
         if digest != request.trade_pin_digest:
             raise RequestError(409, 'micro_cube_changed', 'The held cube and current relevant trade generations differ.')
+        key = (request, tuple(trade_digest(source.records) for source in pinned))
+        held = cache.get_pinned(key) if cache is not None else None
+        if held is not None:
+            if cache is not None:
+                cache.put(key, version, held)
+            return held
         book_rows, flows, grouping = _book(books, request), _flow(trades, request), _flow(aggregates, request, groups=True)
         coverage_bins = {name: source.coverage(request) for name, source in zip(('trades', 'groups', 'book'), pinned, strict=True)}
         bins: list[dict[str, object]] = []
@@ -247,10 +338,11 @@ def read_micro(client: Client, database: str, lock_root: Path, request: MicroReq
             })
         answer: dict[str, object] = {
             'schema': SCHEMA, 'from': request.start, 'to': request.end, 'step': request.step, 'asOf': request.as_of,
-            'nearBps': NEAR_BPS, 'anchor': book_rows.get(-1), 'bins': bins,
+            'nearBps': NEAR_BPS, 'anchor': book_rows.get(-1) if request.detail else None, 'bins': bins,
             'sources': {name: source.describe() for name, source in zip(('trades', 'groups', 'book'), pinned, strict=True)},
             'tradePinDigest': digest,
-            'method': {'book': 'Last observed sample in each interval; depth within 0.1 bp of its mid',
+            'method': {'book': 'One last eligible quote per observed second; means use seconds with both 0.1 bp radii captured; last quote retained separately',
+                       'normal': 'Mean total near depth in the preceding hour, excluding the displayed interval; at least 1800 observed near-depth seconds',
                        'notional': 'price * quantity, USDT; aggregate grouping is never added to execution flow',
                        'flow': 'Individual executions' if request.detail else 'Accepted one-minute bars',
                        'grouping': 'Exchange aggregate trades, not parent-order identity',
@@ -258,4 +350,6 @@ def read_micro(client: Client, database: str, lock_root: Path, request: MicroReq
         }
         if len(json.dumps(answer, allow_nan=False).encode()) > MAX_REPLY:
             raise RequestError(413, 'micro_result_too_large', 'Choose a shorter Micro range.')
+        if cache is not None:
+            cache.put(key, version, answer)
         return answer

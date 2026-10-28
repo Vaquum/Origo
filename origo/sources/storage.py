@@ -356,7 +356,9 @@ class SourceStore:
             settings={'max_table_size_to_drop': 0},
         )
 
-    def _current_partitions_select(self, source_key: str | None = None) -> str:
+    def _current_partitions_select(
+        self, source_key: str | None = None, *, source_keys: tuple[str, ...] | None = None,
+    ) -> str:
         from .registry import SOURCE_REGISTRY
 
         policies = {source.key: source.read_policy for source in SOURCE_REGISTRY}
@@ -366,6 +368,9 @@ class SourceStore:
             if policy == SourceReadPolicy.AVAILABLE
         ) or "''"
         predicate = f" WHERE a.source_key='{identifier(source_key)}'" if source_key is not None else ''
+        if source_keys is not None:
+            keys = ', '.join(f"'{identifier(key)}'" for key in source_keys)
+            predicate = f' WHERE a.source_key IN ({keys})'
         return f"""WITH covered AS (
                 SELECT a.*, maxIf(partition_end, NOT provisional) OVER (
                     PARTITION BY source_key ORDER BY partition_start, provisional
@@ -623,15 +628,26 @@ class SourceStore:
         self, start: datetime, end: datetime, *, settings: Mapping[str, object] | None = None,
     ) -> tuple[StateRecord, ...]:
         """Pin selected overlapping generations after resolving canonical replacement and gaps."""
+        return self.current_records_by_source({self.spec.key: start}, end, settings=settings)[self.spec.key]
+
+    def current_records_by_source(
+        self, starts: Mapping[str, datetime], end: datetime, *, settings: Mapping[str, object] | None = None,
+    ) -> dict[str, tuple[StateRecord, ...]]:
+        """Pin several sources in one statement, retaining each source's exact lower bound."""
         rows = self.execute(
-            f'''SELECT partition_key, provisional, partition_start, partition_end,
+            f'''SELECT source_key, partition_key, provisional, partition_start, partition_end,
                 generation, revision, build_id, component_hashes
-                FROM ({self._current_partitions_select(self.spec.key)})
+                FROM ({self._current_partitions_select(source_keys=tuple(starts))})
                 WHERE partition_start < %(end)s AND partition_end > %(start)s
-                ORDER BY partition_start, provisional''',
-            {'start': start, 'end': end}, settings,
+                ORDER BY source_key, partition_start, provisional''',
+            {'start': min(starts.values()), 'end': end}, settings,
         )
-        return tuple(self._state_record(row) for row in rows)
+        selected: dict[str, list[StateRecord]] = {key: [] for key in starts}
+        for row in rows:
+            key, record = str(row[0]), self._state_record(row[1:])
+            if record.partition.end > starts[key]:
+                selected[key].append(record)
+        return {key: tuple(records) for key, records in selected.items()}
 
     def snapshot(self, *, canonical_only: bool = False) -> Snapshot:
         records = self.records(canonical_only=canonical_only)

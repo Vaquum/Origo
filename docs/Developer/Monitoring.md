@@ -291,6 +291,20 @@ R1 still requires an actual current observation within its freshness budget.
 Micro reports actual observed book milliseconds independently of trade coverage.
 Arrow retains sparse original rows and reports expected/missing seconds in its
 manifest. No interpolation, carry-forward, zero-valued book or new clock fills a gap.
+R1 measures book age from the genuine last exchange clock, including trailing
+missing seconds, and fails on an empty current minute. C1/C2 may pass a finalized
+empty interval; its metric is absent. A current empty Arrow file is a valid delivered
+artifact, with zero rows and explicit missing coverage. Its `active_through` is the
+processed interval boundary; quote clocks remain in the actual rows. Publication
+currency measures delivery against selected inputs, while R1 judges live observations.
+The existing deployment readiness check deliberately still requires a recent full
+60-second minute and metric; accepting a historical gap does not relax rollout readiness.
+Exact gap evidence is in the monitor's existing raw law reports and C1/C2 gate events,
+served by `/law.json` and `/law/history.json` and linked from Dagit's monitor
+checks. Browser evidence uses comma-separated, fixed-width 15-digit hexadecimal
+observed-second masks, earliest minute first and bit0 representing second0. This
+preserves all60bits; internal revision evidence retains UInt64 numeric masks and
+its SHA-256 binding. Notification-frame measurement allowlists are unchanged.
 Sources lists canonical and provisional depth20 and minute metrics,
 with activation hash, build identity and data-through evidence. Recovery displays
 hourly book and daily trade canonical readiness and calendar coverage.

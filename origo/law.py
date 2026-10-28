@@ -191,6 +191,7 @@ class _Proof:
             missing = next((index * 60 + second for index, mask in enumerate(self.second_masks)
                             for second in range(60) if not mask & (1 << second)), None)
             coverage['first_missing_second'] = (self.start + timedelta(seconds=missing)).isoformat() if missing is not None else None
+            coverage['observed_second_masks_hex'] = ','.join(f'{mask:015x}' for mask in self.second_masks)
         return _result('PASS' if observed else 'FAIL', 'active_proof' if observed else 'raw_proof_empty',
                        raw_proof_rows=raw[1], **coverage,
                        **{f'hash_{key}': value for key, value in self.hashes.items() if key in expected})
@@ -263,7 +264,7 @@ def _r1(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetim
     for component_key in keys:
         raw = next(component for component in spec.components
                    if component.key == component_key + ('_latest' if provisional else ''))
-        mask_sql = ', groupBitOr(bitShiftLeft(toUInt64(1), toSecond(datetime)))' if grid and component_key == 'depth20' else ''
+        mask_sql = ', groupBitOr(bitShiftLeft(toUInt64(1), toSecond(datetime))), max(exchange_time_us)' if grid and component_key == 'depth20' else ''
         rows = query(f"""SELECT count(){mask_sql} FROM {database}.{identifier(spec.names.prefix)}_{identifier(raw.key)}_revisions
             WHERE source_date=%(date)s AND partition_key=%(key)s AND revision=%(revision)s
               AND build_id=%(build)s AND {identifier(raw.time_column)}>=%(minute)s
@@ -274,6 +275,10 @@ def _r1(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetim
         counts[component_key] = int(str(rows[0][0]))
         if grid and component_key == 'depth20':
             observed_mask = int(str(rows[0][1]))
+            if counts[component_key]:
+                observed = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(microseconds=int(str(rows[0][2])))
+                evidence.update(last_exchange_time=observed.isoformat(),
+                                age_seconds=max(0.0, (now - observed).total_seconds()))
         if grid:
             evidence['rows_' + component_key] = counts[component_key]
     evidence['row_count'] = counts[keys[0]]
@@ -303,7 +308,7 @@ def _r1(query: _Queries, database: str, spec: RevisionedSourceSpec, now: datetim
                         covered_minutes=len(accepted), missing_minutes=expected_minutes - len(accepted))
         if len(accepted) != expected_minutes:
             return _result('FAIL', 'reader_book_minutes_missing', **evidence)
-    stale = (now - _utc(end)).total_seconds() > budget
+    stale = float(str(evidence['age_seconds'])) > budget
     return _result('FAIL' if stale else 'PASS', 'reader_stale' if stale else 'reader_current', **evidence)
 
 
@@ -391,6 +396,8 @@ def _c2(query: _Queries, database: str, proofs: list[_Proof], source: str, now: 
                 missing_seconds += missing
                 if missing and first_gap is None:
                     first_gap = slot.strftime('%Y-%m-%dT%HZ')
+                    evidence.update(first_missing_second=result['evidence'].get('first_missing_second'),
+                                    first_gap_observed_second_masks_hex=result['evidence'].get('observed_second_masks_hex'))
         elif first is None:
             first = result
             evidence[f'first_invalid_{unit}'] = slot.strftime('%Y-%m-%dT%HZ') if hourly else slot.date().isoformat()

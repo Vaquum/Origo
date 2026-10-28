@@ -164,6 +164,7 @@ def test_micro_native_arithmetic_clocks_gaps_grouping_and_generation_fence(
         # A receipt after the replay edge must not leak the ending snapshot.
         early = read_micro(client, 'origo', tmp_path, MicroRequest(start, start + 1000, 1000, start + 1000, digest))
         assert cast(list[dict[str, object]], early['bins'])[0]['book'] is None
+        assert cast(list[dict[str, object]], early['bins'])[0]['coveredMs'] == {'book': 0, 'trades': 1000, 'groups': 1000}
         # Genuine out-of-excerpt book gaps stay absent, although a partition envelope exists.
         gap = read_micro(client, 'origo', tmp_path, MicroRequest(start + 600_000, start + 630_000, 1000, start + 630_000, digest))
         assert all(row['book'] is None and row['coveredMs']['book'] == 0

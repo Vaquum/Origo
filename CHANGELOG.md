@@ -1,8 +1,3 @@
-# v3.34.58
-
-- Finalize verified top20 minutes and hours with explicit observed-second coverage, preserving gaps and original observations without repeated missing-input failures.
-- Carry actual book coverage through reader laws, Micro and Arrow publication while preserving integrity and freshness checks.
-
 # v3.34.57
 
 - Retain only the current local Hugging Face export after publication, retry or failure; reclaim superseded exports under the existing consumer lock.

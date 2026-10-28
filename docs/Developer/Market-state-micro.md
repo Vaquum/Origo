@@ -37,12 +37,26 @@ build and coverage interval separately for `trades`, `groups` and `book`.
 - `coveredMs`: accepted interval coverage for each source. Incomplete trade or
   grouping coverage makes its corresponding object null, including a missing
   source; it never becomes measured zero.
-- `book`: the **last eligible observation**, not an average. It contains
+- `book`: interval statistics and the **last eligible observation**. It contains
   `exchangeTimeUs`, `observedAtUs`, `mid`, `spreadBps`, `bid`, `ask`,
   `bidReachBps`, `askReachBps` and the number of distinct observed exchange
   `seconds`. Compare seconds with `step/1000` to identify sample gaps.
   No eligible sample makes the object null. Each side's depth is null if the
   twentieth level does not reach the complete 0.1 bp radius around this mid.
+  `meanBid` and `meanAsk` average the genuine one-Hz samples for which both
+  radii are captured; `nearSeconds` is their denominator. Missing seconds and
+  incomplete radii contribute neither invented zero depth nor forward-filled
+  quotes. `meanSpreadBps` averages observed spreads. `firstMid`,
+  `firstExchangeTimeUs` and `firstObservedAtUs` identify the first eligible
+  quote; `maxObservedAtUs` bounds every receipt contributing to the interval.
+  A replay consumer must check that maximum, not merely the final quote's receipt.
+  `normalDepth` is mean total near depth in the preceding UTC hour, excluding
+  the displayed interval. It is null with fewer than 1800 eligible observed
+  seconds; `normalSeconds` discloses that support. The baseline uses only quotes
+  received before their minute closed. Detail has no hourly normalization.
+  Overview therefore selects an additional hour of book inputs, whose native
+  identities also appear in `sources.book`. This baseline is independent of
+  the viewport and requested bin width.
 - `flow`: `buy`, `sell`, individual execution `count`, `buyVwap`, `sellVwap`.
 - `groups`: exchange aggregate `count`, `buy`, `sell`, `meanNotional` and,
   in detail only, `maxNotional`. Overview's maximum is null because minute
@@ -80,3 +94,15 @@ existing query receipts. No successful-looking partial response is delivered.
 Acceptance uses the genuine October 24 book/execution fixture and a coeval
 accepted aggregate excerpt with its original IDs and source-pin provenance.
 Production measurements and their limitations belong in the performance log.
+
+The API retains at most eight request results, each within the same 4-MiB
+limit. It holds all source fences before testing a cache hit. A single query
+checks the append-only activation counts/timestamps and immutable anchors of
+all three sources. A changed watermark resolves their selected identities in
+one native statement; an unchanged relevant set can reuse its result even
+after an unrelated activation. Book identities include the baseline hour.
+Corrections, canonical replacement and rollback activations invalidate their
+affected results. This cache is transient request reuse, not source history.
+The Explorer bridge always reaches this validator and relies on the existing
+two-slot API admission; it neither trusts a whole-pack cache nor queues Micro
+behind unrelated motion/bar work.

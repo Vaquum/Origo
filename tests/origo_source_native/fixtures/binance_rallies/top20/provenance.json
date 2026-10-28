@@ -59,5 +59,28 @@
     "rows": 22257,
     "sha256": "4dd5e5d0d85dfda002300cd5a51df010d6f0bd95beb9ac76fca5bc166980f3c6",
     "note": "Coeval original aggregate rows read from the accepted source; exact revision/build and bounds are embedded in Parquet schema provenance."
+  },
+  "micro_history": {
+    "file": "book-history.parquet",
+    "sha256": "f43dc639476886f0cce5490298f7afa1c6d4f07d2d476c240bbafadf8b589dfd",
+    "rows": 3600,
+    "capture": {
+      "from": "2026-10-24T13:24:00+00:00",
+      "to": "2026-10-24T14:24:00+00:00",
+      "source": "binance_spot_top20_v1",
+      "partitions": [
+        [
+          "2026-10-24T13Z",
+          "render-top20-v1:82c3eb4918070e65f1ff489c95060272974ba4b0bf44837f66012677509cc0f3",
+          "112772ca-2d78-45be-9a75-0ab89aca082a"
+        ],
+        [
+          "2026-10-24T14Z",
+          "render-top20-v1:e43c32fd05fc1ca6f06f62b16f3ab62444c457174eb38a54be90a6c289e67dd6",
+          "e8dcc158-0e78-47a9-a5b2-2b5a86c89986"
+        ]
+      ],
+      "purpose": "Genuine preceding-hour quotes for Micro normalization; values and original clocks unchanged"
+    }
   }
 }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -62,14 +63,22 @@ def _seed(client: Client) -> tuple[SourceStore, ...]:
         partition = store.spec.canonical.partition('2026-10-24T14Z' if 'top20' in store.spec.key else '2026-10-24')
         prefix: Row = (partition.start.date(), partition.key, 'captured', build)
         if 'top20' in store.spec.key:
-            frame = pl.read_parquet(FIXTURE / 'books.parquet')
-            rows: list[Row] = []
-            for source in frame.iter_rows(named=True):
-                source['datetime'] = EPOCH + timedelta(seconds=source['datetime'])
-                for side in ('bids', 'asks'):
-                    source[side] = [tuple(level.values()) for level in source[side]]
-                rows.append((*prefix, *source.values()))
-            store.execute(f'INSERT INTO {store.component_table("depth20")} VALUES', rows)
+            original = pl.read_parquet(FIXTURE / 'books.parquet')
+            frame = pl.concat([pl.read_parquet(FIXTURE / 'book-history.parquet').cast(original.schema), original])
+            for key in ('2026-10-24T13Z', '2026-10-24T14Z'):
+                partition = store.spec.canonical.partition(key)
+                rows: list[Row] = []
+                for source in frame.filter(
+                    (pl.col('datetime') >= int(partition.start.timestamp()))
+                    & (pl.col('datetime') < int(partition.end.timestamp()))
+                ).iter_rows(named=True):
+                    source['datetime'] = EPOCH + timedelta(seconds=source['datetime'])
+                    for side in ('bids', 'asks'):
+                        source[side] = [tuple(level.values()) for level in source[side]]
+                    rows.append((partition.start.date(), partition.key, 'captured', build, *source.values()))
+                store.execute(f'INSERT INTO {store.component_table("depth20")} VALUES', rows)
+                store.insert_activation(StateRecord(partition, 1, 'captured', build, ()), 'micro-capture-control')
+            continue
         else:
             aggregate = 'aggtrades' in store.spec.key
             frame = pl.read_parquet(FIXTURE / ('aggtrades.parquet' if aggregate else 'trades.parquet'))
@@ -172,6 +181,73 @@ def test_micro_native_arithmetic_clocks_gaps_grouping_and_generation_fence(
         assert coarse['count'] == whole_minute.height
         assert float(str(coarse['buy'])) + float(str(coarse['sell'])) == pytest.approx(
             math.fsum(price * quantity for price, quantity in whole_minute.select('price', 'quantity').iter_rows()), rel=1e-12, abs=1e-6)
+        # Means represent actual observed seconds, not an arbitrary ending snapshot.
+        history = pl.concat([pl.read_parquet(FIXTURE / 'book-history.parquet').cast(books.schema), books])
+        def near(row: dict[str, object]) -> tuple[float, float] | None:
+            bids, asks = cast(list[dict[str, float]], row['bids']), cast(list[dict[str, float]], row['asks'])
+            mid = (bids[0]['1'] + asks[0]['1']) / 2
+            if (mid - bids[-1]['1']) / mid * 10000 < .1 or (asks[-1]['1'] - mid) / mid * 10000 < .1:
+                return None
+            return (math.fsum(p['1'] * p['2'] for p in bids if p['1'] >= mid * (1 - .00001)),
+                    math.fsum(p['1'] * p['2'] for p in asks if p['1'] <= mid * (1 + .00001)))
+        observed = history.filter((pl.col('exchange_time_us') >= start * 1000)
+                                  & (pl.col('exchange_time_us') < (start + 60000) * 1000)
+                                  & (pl.col('observed_at_us') < (start + 60000) * 1000)).sort('exchange_time_us')
+        amounts = [amount for row in observed.iter_rows(named=True) if (amount := near(row)) is not None]
+        measured_book = cast(dict[str, object], cast(list[dict[str, object]], overview['bins'])[0]['book'])
+        assert measured_book['nearSeconds'] == len(amounts)
+        for index, name in enumerate(('meanBid', 'meanAsk')):
+            assert measured_book[name] == pytest.approx(math.fsum(a[index] for a in amounts) / len(amounts), rel=1e-12, abs=1e-6)
+        assert measured_book['firstExchangeTimeUs'] == observed['exchange_time_us'][0]
+        assert measured_book['maxObservedAtUs'] == observed['observed_at_us'].max()
+        assert measured_book['meanBid'] != measured_book['bid']
+        prior = history.filter((pl.col('exchange_time_us') >= (start - 3600000) * 1000)
+                               & (pl.col('exchange_time_us') < start * 1000))
+        normal = [sum(amount) for row in prior.iter_rows(named=True)
+                  if row['observed_at_us'] < (row['exchange_time_us'] // 60000000 + 1) * 60000000
+                  and (amount := near(row)) is not None]
+        assert len(normal) >= 1800 and measured_book['normalSeconds'] == len(normal)
+        assert measured_book['normalDepth'] == pytest.approx(math.fsum(normal) / len(normal), rel=1e-12, abs=1e-6)
+        wider = read_micro(client, 'origo', tmp_path, MicroRequest(start, start + 120000, 120000, start + 120000, digest))
+        assert cast(list[dict[str, object]], wider['bins'])[0]['book']['normalDepth'] == measured_book['normalDepth']
+        beginning = int(datetime(2026, 10, 24, 13, 24, tzinfo=UTC).timestamp() * 1000)
+        warmup = read_micro(client, 'origo', tmp_path, MicroRequest(beginning, beginning + 60000, 60000, beginning + 60000, digest))
+        assert cast(list[dict[str, object]], warmup['bins'])[0]['book']['normalDepth'] is None
+        # Cache hits retain the source fences and revalidate every source, including
+        # a baseline-only book partition. Activation envelopes below are controls;
+        # copied market values and clocks remain genuine and unchanged.
+        cache = market_state_micro.MicroCache()
+        cached = read_micro(client, 'origo', tmp_path, request, cache=cache)
+        overview_request = MicroRequest(start, start + 60000, 60000, start + 60000, digest)
+        cached_overview = read_micro(client, 'origo', tmp_path, overview_request, cache=cache)
+        assert read_micro(client, 'origo', tmp_path, request, cache=cache) is cached
+        with source_lock(tmp_path, SPECS[2].key, 'heavy'):
+            with pytest.raises(SourceError, match='already held'):
+                read_micro(client, 'origo', tmp_path, request, cache=cache)
+        for store in (stores[1], stores[2], stores[0]):
+            record = store.records(canonical_only=True)[0]
+            revision, build = 'captured-reaccepted', uuid4()
+            for component in ('depth20',) if 'top20' in store.spec.key else ('raw', 'time'):
+                table = store.component_table(component)
+                store.execute(f'''INSERT INTO {table} SELECT * REPLACE(%(revision)s AS revision, toUUID(%(build)s) AS build_id)
+                    FROM {table} WHERE partition_key=%(partition)s AND revision=%(old_revision)s AND build_id=%(old_build)s''',
+                    {'revision': revision, 'build': str(build), 'partition': record.partition.key,
+                     'old_revision': record.revision, 'old_build': record.build_id})
+            store.insert_activation(replace(record, generation=record.generation + 1, revision=revision, build_id=build), 'micro-cache-control')
+            if store is stores[0]:
+                with pytest.raises(RequestError, match='generations differ'):
+                    read_micro(client, 'origo', tmp_path, request, cache=cache)
+            else:
+                refreshed = read_micro(client, 'origo', tmp_path, request, cache=cache)
+                refreshed_overview = read_micro(client, 'origo', tmp_path, overview_request, cache=cache)
+                assert refreshed_overview is not cached_overview
+                assert refreshed_overview['bins'] == cached_overview['bins']
+                assert refreshed_overview['sources'] != cached_overview['sources']
+                cached_overview = refreshed_overview
+                # Detail has no baseline: the 13Z correction leaves its exact inputs unchanged.
+                if store is stores[1]:
+                    assert refreshed is not cached
+                cached = refreshed
         provenance = json.loads((FIXTURE / 'provenance.json').read_text())
         assert hashlib.sha256((FIXTURE / 'aggtrades.parquet').read_bytes()).hexdigest() == provenance['aggtrades']['sha256']
     finally:

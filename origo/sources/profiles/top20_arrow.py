@@ -105,6 +105,7 @@ def _frame(reader: _BookReader, snapshot: Snapshot, start: datetime, end: dateti
     }
     overrides.update({column.name: pl.String for column in columns if column.sql_type == 'String'})
     overrides['datetime'] = pl.Datetime('us', 'UTC')
+    overrides['canonical'] = pl.Boolean
     overrides.update({side: pl.List(pl.Array(pl.Float64, 2)) for side in ('bids', 'asks')})
     frame = pl.DataFrame(rows, schema=[c.name for c in columns] + ['canonical'],
                          schema_overrides=overrides, orient='row').filter(

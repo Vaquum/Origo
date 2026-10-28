@@ -1384,6 +1384,7 @@ def test_closed_empty_minute_retains_zero_coverage_and_publishable_rows(
         target = Path(str(manifest['files'][0]['path']))
         frame = pl.read_ipc(target)
         assert frame.is_empty() and frame.schema['bids'] == pl.Array(pl.Struct({'price': pl.Float64, 'qty': pl.Float64}), 20)
+        assert frame.schema['canonical'] == pl.Boolean
     # Deliberate delayed-seal metadata models an outage spanning the entire
     # local hour lookup. Both boundary payloads and all market clocks are genuine.
     outage = RenderBookCache(tmp_path / 'outage', cache.market)

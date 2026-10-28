@@ -335,6 +335,7 @@ class RenderBookCache:
         with source_lock(self.root, f'render_{self.market}_{replica.lower()}', 'import', wait=True):
             if self.cursor(replica) != previous:
                 raise SourceError('RENDER_CURSOR', 'Retention cursor changed before recovery.')
+            atomic_write(self.root / self.market / replica / 'history_floor.json', _json(pruned_through))
             atomic_write(self.root / self.market / replica / 'cursor.json', _json(pruned_through))
 
     def _usage(self, replica: str) -> int:
@@ -438,6 +439,9 @@ class RenderBookCache:
                         or tuple(sorted(set(identifiers))) != identifiers
                         or _integer(page.get('next_cursor')) != (identifiers[-1] if identifiers else after)):
                     raise SourceError('RENDER_CURSOR', 'Inventory IDs or next cursor are invalid.')
+                if after == 0:
+                    atomic_write(self.root / self.market / replica / 'history_floor.json',
+                                 _json(_integer(page.get('pruned_through'))))
                 for metadata, identifier in zip(entries, identifiers, strict=True):
                     used = self._save(replica, metadata, read, used)
                     atomic_write(
@@ -454,7 +458,7 @@ class RenderBookCache:
                     )
         return count
 
-    def entries(self, partition: Partition) -> tuple[Mapping[str, object], ...]:
+    def _manifests(self, partition: Partition) -> tuple[Mapping[str, object], ...]:
         cutoff = partition.end + timedelta(minutes=5)
         first = (partition.start - timedelta(minutes=5)).replace(minute=0, second=0, microsecond=0)
         result: list[Mapping[str, object]] = []
@@ -463,18 +467,52 @@ class RenderBookCache:
                 directory = self.root / self.market / replica / first.strftime('%Y-%m-%dT%H')
                 for path in sorted(directory.glob('*.json')):
                     entry = object_mapping(json.loads(path.read_bytes()))
-                    if (
-                        _integer(entry.get('closed_at')) <= _micros(cutoff)
-                        and _integer(entry.get('max_exchange_time')) >= _micros(partition.start)
-                        and _integer(entry.get('min_exchange_time')) < _micros(partition.end)
-                    ):
-                        result.append(entry)
+                    result.append(entry)
             first += timedelta(hours=1)
         return tuple(
             sorted(result, key=lambda m: (_text(m.get('collector')), _integer(m.get('id'))))
         )
 
-    def revision(self, partition: Partition, entries: tuple[Mapping[str, object], ...]) -> Revision:
+    def entries(self, partition: Partition) -> tuple[Mapping[str, object], ...]:
+        cutoff = _micros(partition.end + timedelta(minutes=5))
+        return tuple(entry for entry in self._manifests(partition)
+                     if _integer(entry.get('closed_at')) <= cutoff
+                     and _integer(entry.get('max_exchange_time')) >= _micros(partition.start)
+                     and _integer(entry.get('min_exchange_time')) < _micros(partition.end))
+
+    def _closure(self, partition: Partition, masks: list[int]) -> Mapping[str, object]:
+        incomplete = [index for index, mask in enumerate(masks) if mask != (1 << 60) - 1]
+        first_index = incomplete[0]
+        first = partition.start + timedelta(minutes=first_index,
+            seconds=next(second for second in range(60) if not masks[first_index] & (1 << second)))
+        deadline = partition.end + timedelta(minutes=5)
+        if datetime.now(UTC) < deadline:
+            raise SourceError('RENDER_IMPORT_PENDING', 'Missing seconds await the five-minute arrival cutoff.')
+        manifests = self._manifests(partition)
+        witnesses: dict[str, object] = {}
+        for replica in REPLICAS:
+            cursor = self.cursor(replica)
+            history = self.root / self.market / replica / 'history_floor.json'
+            floor = _integer(json.loads(history.read_bytes())) if history.exists() else 0
+            imported = [entry for entry in manifests if entry.get('collector') == replica
+                        and floor < _integer(entry.get('id')) <= cursor]
+            before = [entry for entry in imported
+                      if _integer(entry.get('min_exchange_time')) < _micros(first)
+                      and _integer(entry.get('first_observed_at')) < _micros(first)]
+            after = [entry for entry in imported
+                     if _integer(entry.get('closed_at')) >= _micros(deadline)]
+            if (not before and not (history.exists() and floor == 0)) or not after:
+                raise SourceError('RENDER_IMPORT_PENDING', f'Replica {replica} has not imported across the missing seconds and arrival cutoff.')
+            witnesses[replica] = {
+                'before': max(before, key=lambda entry: _integer(entry.get('id'))) if before else None,
+                'after': min(after, key=lambda entry: _integer(entry.get('id'))),
+            }
+        return witnesses
+
+    def revision(
+        self, partition: Partition, entries: tuple[Mapping[str, object], ...], *,
+        closure: Mapping[str, object] | None = None,
+    ) -> Revision:
         selected: dict[int, _Observation] = {}
         identities: dict[tuple[str, str, int], bytes] = {}
         states: dict[int, tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]] = {}
@@ -504,14 +542,15 @@ class RenderBookCache:
                     if old_rank is None or rank > old_rank:
                         selected[second] = row
         expected = int((partition.end - partition.start).total_seconds())
+        masks = [0] * (expected // 60)
+        for second in selected:
+            offset = second - int(partition.start.timestamp())
+            masks[offset // 60] |= 1 << (offset % 60)
         if len(selected) != expected:
-            raise SourceError(
-                'RENDER_SECONDS_MISSING',
-                f'{partition.key} has {len(selected)}/{expected} actual seconds.',
-            )
+            closure = closure if closure is not None else self._closure(partition, masks)
         chosen = tuple(selected[second] for second in sorted(selected))
         digest = hashlib.sha256(b'\n'.join(row.raw for row in chosen)).hexdigest()
-        evidence = {
+        evidence: dict[str, object] = {
             'format': 1,
             'market': self.market,
             'partition': partition.key,
@@ -524,6 +563,8 @@ class RenderBookCache:
             'replica_seconds': {r: len(coverage[r]) for r in REPLICAS},
             'redundant_seconds': len(coverage['A'] & coverage['B']),
         }
+        if len(selected) != expected:
+            evidence.update(second_masks=masks, closure=closure)
         encoded = _json(evidence)
         revision = 'render-top20-v1:' + hashlib.sha256(encoded).hexdigest()
         return Revision(
@@ -588,7 +629,10 @@ class RenderBookCanonical:
             if path.exists():
                 pinned = object_mapping(json.loads(path.read_bytes()))
                 entries = _objects(pinned.get('segments'))
-                revision = self.cache.revision(partition, entries)
+                closed = pinned.get('closure')
+                revision = self.cache.revision(
+                    partition, entries, closure=object_mapping(closed) if closed is not None else None,
+                )
                 if revision.evidence_json.encode() != path.read_bytes():
                     raise SourceError('RENDER_PIN_CHANGED', 'Pinned hour evidence changed.')
             else:

@@ -95,7 +95,7 @@ def _frame(reader: _BookReader, snapshot: Snapshot, start: datetime, end: dateti
                       'AND revision=%(revision)s AND build_id=%(build)s', params=params,
         )
         if (digest != dict(record.component_hashes)[component]
-                or count != int((record.partition.end - record.partition.start).total_seconds())):
+                or count > int((record.partition.end - record.partition.start).total_seconds())):
             raise SourceError('RETAINED_CONTENT_INVALID', 'Arrow input contradicts its accepted raw proof.')
         selected = Snapshot(snapshot.token, (record,))
         rows.extend((*row, not record.partition.provisional) for row in reader.rows(component, selected))
@@ -103,13 +103,15 @@ def _frame(reader: _BookReader, snapshot: Snapshot, start: datetime, end: dateti
     overrides: dict[str, pl.DataType | type[pl.DataType]] = {
         column.name: pl.UInt64 for column in columns if column.sql_type == 'UInt64'
     }
+    overrides.update({column.name: pl.String for column in columns if column.sql_type == 'String'})
+    overrides['datetime'] = pl.Datetime('us', 'UTC')
     overrides.update({side: pl.List(pl.Array(pl.Float64, 2)) for side in ('bids', 'asks')})
     frame = pl.DataFrame(rows, schema=[c.name for c in columns] + ['canonical'],
                          schema_overrides=overrides, orient='row').filter(
         pl.col('exchange_time_us').is_between(int(start.timestamp()) * 1_000_000,
                                             int(end.timestamp()) * 1_000_000, closed='left')
     )
-    if frame.is_empty() or frame.select((pl.col('exchange_time_us') // 1_000_000).n_unique()).item() != frame.height:
+    if frame.select((pl.col('exchange_time_us') // 1_000_000).n_unique()).item() != frame.height:
         raise SourceError('BOOK_PUBLICATION_INPUT', 'Arrow requires unique actual observed seconds.')
     return frame.with_columns(
         (pl.col('exchange_time_us') * 1000).alias('ts'),
@@ -147,7 +149,7 @@ def publish_top20_arrow(
         if reused:
             digest = str(previous['sha256'])
             row_count = previous['rows']
-            if type(row_count) is not int or not 0 < row_count <= 1800:
+            if type(row_count) is not int or not 0 <= row_count <= 1800:
                 raise SourceError('BOOK_PUBLICATION_INPUT', 'Published Arrow row count is invalid.')
         else:
             frame = _frame(reader, snapshot, start, end)
@@ -167,6 +169,7 @@ def publish_top20_arrow(
             'format': 1, 'source_key': SOURCE, 'kind': 'arrow', 'depth': 20,
             'state_token': canonical.token, 'pinned_token': snapshot.token, 'input_token': consumed,
             'version': consumed, 'sha256': digest, 'rows': row_count,
+            'expected_seconds': 1800, 'missing_seconds': 1800 - row_count,
             'window_start_us': int(start.timestamp()) * 1_000_000,
             'window_end_us': int(end.timestamp()) * 1_000_000,
             'active_through': end.isoformat(),

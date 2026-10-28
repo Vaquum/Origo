@@ -468,7 +468,7 @@ def test_replica_gap_conditions(
     market: Market,
     condition: str,
 ) -> None:
-    """Only genuine complementary observations can complete a missing source minute."""
+    """Complementary inputs recover seconds; a shared closed gap preserves their absence."""
     cache = RenderBookCache(tmp_path, market)
     for replica in ('A', 'B'):
         feed = _feed(recordings, replica, market)
@@ -489,10 +489,15 @@ def test_replica_gap_conditions(
     adapter = RenderBookCanonical(cache)
     partition = adapter.partition(HOUR)
     if condition == 'shared':
-        with pytest.raises(SourceError) as failure:
+        minute = RenderBookProvisional(cache).partition(MINUTE)
+        revision = RenderBookProvisional(cache).fetch(minute)
+        evidence = json.loads(revision.evidence_json)
+        assert revision.row_count == 0 and evidence['second_masks'] == [0]
+        assert set(evidence['closure']) == {'A', 'B'}
+        # These captures end before the hour's own five-minute cutoff.
+        with pytest.raises(SourceError) as pending:
             adapter.fetch(partition)
-        assert failure.value.code == 'RENDER_SECONDS_MISSING'
-        assert not (tmp_path / market / 'hours' / f'{HOUR}.json').exists()
+        assert pending.value.code == 'RENDER_IMPORT_PENDING'
     else:
         revision = adapter.fetch(partition)
         rows = tuple(revision.rows())
@@ -768,7 +773,7 @@ def test_provisional_fallback_and_late_recovery(
     for adapter, partition in ((provisional, minute), (canonical, hour)):
         with pytest.raises(SourceError) as failure:
             adapter.fetch(partition)
-        assert failure.value.code == 'RENDER_SECONDS_MISSING'
+        assert failure.value.code == 'RENDER_IMPORT_PENDING'
     b = _feed(recordings, 'B', 'perp')
     cache.sync('B', b.read)
     recovered = provisional.fetch(minute)
@@ -849,7 +854,7 @@ def test_native_recovery_discovers_unrequested_hour_and_retries_new_input(
             run_config=request.run_config, raise_on_error=False,
         )
         assert not failed.success
-        assert instance.get_run_by_id(failed.run_id).tags['origo_source_verdict'] == 'RENDER_SECONDS_MISSING'
+        assert instance.get_run_by_id(failed.run_id).tags['origo_source_verdict'] == 'RENDER_IMPORT_PENDING'
         assert requests() == []
         cache.sync('B', _feed(recordings, 'B', cache.market).read)
         recovered = next(r for r in requests() if r.partition_key == HOUR)
@@ -1153,3 +1158,117 @@ def test_spot_arrow_preserves_pinned_rows_and_recovers_corrupt_output(
     ]
     runtime.publish('arrow', str(destination))
     assert monitor._publication_findings() == []
+
+
+@pytest.mark.parametrize('runtime', ['perp'], indirect=True)
+def test_closed_minute_preserves_missing_seconds(
+    runtime: SourceRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The genuine shared 58-second minute closes without inventing rows or rejecting its hour."""
+    captured = load_recordings(FIXTURE / 'perp-gap-20261028')
+    cache = cast(RenderBookCanonical, runtime.spec.canonical).cache
+    minute_key = '2026-10-28T09:21:00Z'
+    hour_key = '2026-10-28T09Z'
+    canonical = cast(RenderBookCanonical, runtime.spec.canonical)
+    provisional = cast(RenderBookProvisional, runtime.spec.provisional)
+    cache.sync('A', _feed(captured, 'A', 'perp').read)
+    with pytest.raises(SourceError) as pending:
+        provisional.fetch(provisional.partition(minute_key))
+    assert pending.value.code == 'RENDER_IMPORT_PENDING'
+    # A recent-tail download cannot acknowledge B's unimported history.
+    b = _feed(captured, 'B', 'perp')
+    cache.sync_tail('B', b.read)
+    with pytest.raises(SourceError) as pending:
+        provisional.fetch(provisional.partition(minute_key))
+    assert pending.value.code == 'RENDER_IMPORT_PENDING'
+    cache.sync('B', b.read)
+    class BeforeCutoff(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            return datetime(2026, 10, 28, 9, 26, 59, tzinfo=UTC)
+    with monkeypatch.context() as early:
+        early.setattr(render_book, 'datetime', BeforeCutoff)
+        with pytest.raises(SourceError) as pending:
+            provisional.fetch(provisional.partition(minute_key))
+        assert pending.value.code == 'RENDER_IMPORT_PENDING'
+    minute = runtime.build(minute_key, provisional=True)
+    raw = runtime.store.table(runtime.spec.names.prefix + '_depth20_current')
+    metrics = runtime.store.table(runtime.spec.names.prefix + '_depth20_1m_current')
+    rows = runtime.store.execute(f'SELECT toSecond(datetime) FROM {raw} ORDER BY datetime')
+    assert [row[0] for row in rows] == [second for second in range(60) if second not in (52, 53)]
+    assert runtime.store.execute(f'SELECT source_timestamp_ms FROM {metrics}') == [(1793179319889,)]
+    assert runtime.build(minute_key, provisional=True) == minute
+    assert minute.partition not in provisional.candidates(
+        datetime(2026, 10, 28, 10, tzinfo=UTC), minute.partition.start, (minute.partition,),
+    )
+    hour = runtime.build(hour_key)
+    assert runtime.store.execute(f'SELECT count(), uniqExact(datetime) FROM {raw}') == [(3598, 3598)]
+    assert runtime.store.execute(f'SELECT count() FROM {metrics}') == [(60,)]
+    runtime.validate_retained(hour)
+    monkeypatch.setattr(law, 'SOURCE_REGISTRY', (runtime.spec,))
+    query = law._Queries(runtime.store.client)
+    proofs = law._proofs(query, 'origo', runtime.spec.key, str(hour.build_id))
+    proof = next(proof for proof in proofs if not proof.provisional)
+    result = proof.verdict()
+    assert result['status'] == 'PASS'
+    assert result['evidence']['expected_seconds'] == 3600
+    assert result['evidence']['observed_seconds'] == 3598
+    assert result['evidence']['missing_seconds'] == 2
+    assert result['evidence']['first_missing_second'] == '2026-10-28T09:21:52+00:00'
+    assert proof.second_masks[21] == ((1 << 60) - 1) ^ (1 << 52) ^ (1 << 53)
+    assert replace(proof, coverage_verified=False).verdict()['status'] == 'UNKNOWN'
+    corrupted = replace(proof, components=tuple(
+        (key, count - 1, digest, completed) if key == 'depth20' else (key, count, digest, completed)
+        for key, count, digest, completed in proof.components
+    ))
+    assert corrupted.verdict()['reason'] == 'book_component_grid_incomplete'
+    now = datetime(2026, 10, 28, 10, 6, tzinfo=UTC)
+    assert law._c1(proofs, runtime.spec.key, now)['status'] == 'PASS'
+    # Bound the calendar to the genuine captured hour; only its metadata anchor is a control.
+    monkeypatch.setitem(law.LAW_ANCHORS, runtime.spec.key, hour.partition.start)
+    calendar = law._c2(lambda sql, params: [(hour.partition.start,)], 'origo', proofs,
+                       runtime.spec.key, now + timedelta(hours=1))
+    assert calendar['status'] == 'PASS'
+    assert calendar['evidence']['missing_seconds'] == 2
+    assert calendar['evidence']['missing_hours'] == 0
+    assert canonical.fetch(canonical.partition(hour_key)).key == hour.revision
+    # An expiry jump cannot retroactively acknowledge cached tail-only history.
+    cursor = cache.cursor('B')
+    cache.resume_retained('B', cursor, cursor + 1)
+    with pytest.raises(SourceError) as pending:
+        provisional.fetch(minute.partition)
+    assert pending.value.code == 'RENDER_IMPORT_PENDING'
+    runtime.validate_retained(hour)
+
+
+def test_closed_empty_minute_retains_zero_coverage_and_publishable_rows(
+    runtime: SourceRuntime,
+    recordings: dict[tuple[str, Market], RecordedFeed],
+    tmp_path: Path,
+) -> None:
+    """An explicit missing-input fault closes empty minutes without zero-valued market rows."""
+    cache = cast(RenderBookCanonical, runtime.spec.canonical).cache
+    for replica in ('A', 'B'):
+        feed = _feed(recordings, replica, cache.market)
+        feed.omitted = _gap(feed, 21)  # Deliberate source-history omission; all retained bytes are genuine.
+        cache.sync(replica, feed.read)
+    empty = runtime.build(MINUTE, provisional=True)
+    runtime.validate_retained(empty)
+    assert runtime.store.execute(
+        f'SELECT count() FROM {runtime.store.component_table("depth20_latest")}'
+    ) == [(0,)]
+    assert runtime.store.execute(
+        f'SELECT count() FROM {runtime.store.component_table("depth20_1m_latest")}'
+    ) == [(0,)]
+    proof = law._proofs(law._Queries(runtime.store.client), 'origo', runtime.spec.key, str(empty.build_id))[0]
+    assert proof.verdict()['status'] == 'PASS'
+    assert proof.verdict()['evidence']['missing_seconds'] == 60
+    if runtime.spec.consumers:
+        destination = tmp_path / 'publication'
+        runtime.publish('arrow', str(destination))
+        manifest = json.loads((destination / 'latest.json').read_bytes())
+        assert manifest['rows'] == 0 and manifest['missing_seconds'] == manifest['expected_seconds'] == 1800
+        target = Path(str(manifest['files'][0]['path']))
+        frame = pl.read_ipc(target)
+        assert frame.is_empty() and frame.schema['bids'] == pl.Array(pl.Struct({'price': pl.Float64, 'qty': pl.Float64}), 20)

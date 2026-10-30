@@ -303,10 +303,14 @@ def test_monitor_reports_failed_checks_and_queue_backlog(recorder: _Recorder, tm
         for check in node['assetChecksOrError'].get('checks', [])
     }
     assert declared
-    monitor = _monitor(recorder, tmp_path)
+    monitor = _monitor(recorder, tmp_path, settings=_settings(recorder, public_dashboard_url='https://origo.vaquum.fi/law'))
     outcome = monitor.tick(NOW)
     assert 'queue_backlog' in outcome.failed
     assert declared <= set(outcome.failed)
+    email = _emails(recorder)[-1]
+    for fact in ('Run queue', f'{health["data"]["queued"]["count"]} runs are queued.',
+                 f'Queue limit {monitor.queue_threshold} runs', 'Check queued runs in Dagit.', 'overview=queue'):
+        assert fact in email['text'] and fact in email['html']
     # The same evaluation is behind the cursor on the next tick, so it is not found again.
     again = monitor.tick(NOW + timedelta(minutes=1))
     assert 'queue_backlog' in again.failed

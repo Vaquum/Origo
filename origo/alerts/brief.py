@@ -70,6 +70,7 @@ def _issues(facts: Document) -> tuple[list[Issue], list[str], list[str]]:
     notes: list[str] = []
     sources = _objects(facts.get('sources'))
     outputs = _objects(facts.get('outputs'))
+    operations = _object(facts.get('operations'))
     for source in sources:
         key = str(source['id'])
         name = _name(source.get('name') or key)
@@ -143,7 +144,9 @@ def _issues(facts: Document) -> tuple[list[Issue], list[str], list[str]]:
         key = 'binance_perp_trades' if identity == 'collector_capture' else next((str(source['id']) for source in sources if str(source['id']) in scope), identity)
         label = next((_name(source.get('name') or key) for source in sources if source['id'] == key), _name(scope or condition.get('check')))
         status = str(condition['status'])
-        issue = issues.setdefault(key, Issue(key, label, status, target={'view': 'overview', 'overview': 'collectors' if condition.get('check') == 'collectors_serving' else 'workers'}))
+        overview = {'collectors_serving': 'collectors', 'queue_bounded': 'queue', 'dagster_reachable': 'queue', 'workers_alive': 'workers'}.get(str(condition.get('check')))
+        target: Document = {'view': 'overview', **({'overview': overview} if overview else {})}
+        issue = issues.setdefault(key, Issue(key, label, status, target=target))
         if status == 'FAIL':
             issue.status = 'FAIL'
         keys = condition.get('keys')
@@ -161,9 +164,21 @@ def _issues(facts: Document) -> tuple[list[Issue], list[str], list[str]]:
         elif identity.startswith('detector_failed:'):
             issue.lines.append('Monitor evidence is unavailable for this check.')
             issue.action = 'Check origo_monitor:' + str(condition.get('check')) + ' in Dagit.'
+        elif identity == 'queue_backlog':
+            queue = _object(_object(operations.get('monitor.queue_bounded')).get('evidence'))
+            issue.label = 'Run queue'
+            issue.lines.append(f'{queue["queued_runs"]} runs are queued.' if queue.get('queued_runs') is not None else 'The run queue exceeds its limit.')
+            if queue.get('queue_threshold') is not None:
+                issue.limits.append(f'Queue limit {queue["queue_threshold"]} runs')
+            issue.action = 'Check queued runs in Dagit.'
+        elif identity.startswith('queue_stuck:'):
+            issue.lines.append('A run has exceeded its queue wait limit.')
+            issue.action = 'Check the queued run in Dagit.'
+        elif identity.startswith('daemon_unhealthy:'):
+            issue.lines.append(f'The {scope} daemon is unhealthy.')
+            issue.action = 'Check daemon health in Dagit.'
         else:
             issue.lines.append(str(condition.get('check')).replace('_', ' ').capitalize() + ': ' + text.replace('_', ' ') + '.')
-    operations = _object(facts.get('operations'))
     # A failed operational check still needs a row when its detailed finding was not retained.
     for check in ('dagster_reachable', 'queue_bounded', 'workers_alive', 'collectors_serving', 'publication_current'):
         result = _object(operations.get('monitor.' + check))

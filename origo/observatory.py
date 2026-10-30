@@ -780,12 +780,6 @@ def build_summary(current: Document, catalog: Document, history: Sequence[Observ
         'current_evidence': _current_evidence(effective, catalog, frames)}
     for incident in incidents:
         incident['display_lines'] = incident_lines(incident, 4)
-    evidence = summary['current_evidence']
-    events = _objects(evidence.get('events'))
-    evidence['events'] = cast(list[Json], events)
-    while len(json.dumps(summary, separators=(',', ':'), ensure_ascii=False).encode()) > MAX_SUMMARY_BYTES and events:
-        events.pop()
-        evidence['event_groups_omitted'] = (_number(evidence.get('event_groups_omitted')) or 0) + 1
     # Detail yields before identity rows; any truncation remains explicit.
     if len(json.dumps(summary, separators=(',', ':'), ensure_ascii=False).encode()) > MAX_SUMMARY_BYTES:
         for incident in incidents:
@@ -799,6 +793,12 @@ def build_summary(current: Document, catalog: Document, history: Sequence[Observ
         incidents.pop()
         if summary['omitted_groups'] is not None:
             summary['omitted_groups'] += 1
+    evidence = summary['current_evidence']
+    events = _objects(evidence.get('events'))
+    evidence['events'] = cast(list[Json], events)
+    while len(json.dumps(summary, separators=(',', ':'), ensure_ascii=False).encode()) > MAX_SUMMARY_BYTES and events:
+        events.pop()
+        evidence['event_groups_omitted'] = (_number(evidence.get('event_groups_omitted')) or 0) + 1
     if len(json.dumps(summary, separators=(',', ':'), ensure_ascii=False).encode()) > MAX_SUMMARY_BYTES:
         raise ValueError('operator_summary_exceeds_limit')
     return summary

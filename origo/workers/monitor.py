@@ -187,7 +187,7 @@ class Finding:
 
 def notification_change(transition: NotificationTransition, *, event_stream: bool = False) -> bool:
     if event_stream or transition['group_id'].startswith(('check_failed:', 'run_failure:', 'receipt_failed:', 'error_logs:')):
-        return transition['description'] == 'New historical event episode'
+        return transition['description'] in ('New historical event episode', 'Ongoing · Verification restored')
     return transition['verification'] != 'expected_wait'
 
 
@@ -777,6 +777,7 @@ class Monitor:
         self.publication_root = publication_root
         self.queue_threshold = settings.queue_threshold if settings else queue_threshold
         self.notification_history = _NotificationHistory(law_root)
+        self.current_conditions: list[Json] = []
         self.notification_clock: tuple[float, float] | None = None
         self.event_counts: dict[str, int] = {}
         self.condition_states: dict[str, tuple[str, str, bool]] = {}
@@ -817,6 +818,7 @@ class Monitor:
         self.event_counts = {}
         self.condition_states = {}
         self.publication_policy = {}
+        self.current_conditions = []
         self.tick_evidence = {
             'dagster_reachable': {'reachable': None, 'unhealthy_daemons': None},
             'queue_bounded': {'queued_runs': None, 'queue_threshold': self.queue_threshold},
@@ -843,7 +845,7 @@ class Monitor:
         collectors, collectors_read = self._guarded(
             'collectors_serving',
             'collectors',
-            lambda: (self._collector_findings(minute - timedelta(minutes=1)), True),
+            lambda: (self._collector_findings(now - timedelta(minutes=1)), True),
         )
         logs, logs_read = self._guarded(
             'no_error_logs', 'logs', lambda: (self._log_findings(cursor, window_end), True)
@@ -960,12 +962,12 @@ class Monitor:
                 prior = self.notification_history.briefs[cursor.notified_through]
                 previous_mail = {'at': datetime.fromtimestamp(cursor.last_delivery['completed_at'], UTC).isoformat(),
                             'ages': prior.get('ages')}
-            summary = self._notification_summary(report, now, delivery_status, history, previous=previous_mail)
             events: dict[str, Json] = {item['group_id']: {'scope': item['group_id'], 'at': item['sampling_slot']}
                       for item in changes if item['group_id'].startswith(('check_failed:', 'run_failure:', 'receipt_failed:', 'error_logs:'))}
-            evidence = summary.setdefault('current_evidence', {})
-            evidence['events'] = list(events.values())[-8:]
-            evidence['event_groups_omitted'] = max(0, len(events) - 8)
+            event_priority = {'error_logs': 0, 'receipt_failed': 1, 'check_failed': 2, 'run_failure': 3}
+            selected_events = sorted(events, key=lambda key: (event_priority[key.partition(':')[0]], key))[:8]
+            summary = self._notification_summary(report, now, delivery_status, history, previous=previous_mail,
+                                                 events=[events[key] for key in selected_events], events_omitted=max(0, len(events) - 8))
             delivery_now = now + timedelta(seconds=max(0.0, time.monotonic() - tick_started))
             if not cursor.notification_fault and self.settings is not None and plan_notification(cursor, summary, self.settings, delivery_now, written, transitions=bool(changes)):
                 cursor.save(self.cursor_path)
@@ -1350,6 +1352,11 @@ class Monitor:
                 observations[group] = observation(group, check, prior['scope'], 'PASS' if healthy else 'UNKNOWN', [], complete=healthy)
         self.notification_check_outcomes = {check: 'FAIL' if any(item.check == check for item in findings) else 'PASS' if reads.get(check, False) else 'UNKNOWN' for check in CHECK_NAMES}
         ordered = sorted(observations.values(), key=lambda row: (row['status'] not in ('FAIL', 'UNKNOWN'), row['group_id']))
+        self.current_conditions = [
+            {'id': item['group_id'], 'status': item['status'], 'check': item['check'],
+             'scope': item['scope'], 'keys': list(item['detector_keys'])}
+            for item in ordered if item['kind'] == 'condition' and item['status'] in ('FAIL', 'UNKNOWN')
+            and item['check'] in CHECK_NAMES and not item['group_id'].startswith(('law.', 'law:', 'publication:'))]
         return ObservationFrame(
             sampling_slot=slot, catalog_version=self.catalog['version'] if self.catalog else None,
             law_sample_ref=f'samples-{now.date().isoformat()}.jsonl#{slot}' if report is not None else None,
@@ -1357,7 +1364,7 @@ class Monitor:
             observations=ordered, omitted_groups=0, complete=all(reads.values()),
         )
 
-    def _notification_summary(self, report: LawReport | None, now: datetime, status: str, history: Sequence[ObservationFrame], *, previous: Document | None = None) -> OperatorSummary:
+    def _notification_summary(self, report: LawReport | None, now: datetime, status: str, history: Sequence[ObservationFrame], *, previous: Document | None = None, events: list[Json] | None = None, events_omitted: int = 0) -> OperatorSummary:
         briefs = self.notification_history.briefs
         terminal = report['sampling_slot'] if report else None
         clear = consecutive_window(list(briefs.values()), terminal or '')
@@ -1377,6 +1384,9 @@ class Monitor:
             'consecutive_clear_slots': len(clear),
             'not_due_slots': sum(item.get('not_due') is True for item in clear),
             'previous_email': previous,
+            'monitor_conditions': self.current_conditions,
+            'notification_events': events,
+            'notification_events_omitted': events_omitted,
         }
         summary = build_summary(current, cast(Document, self.catalog) if self.catalog else {}, history, now=now)
         return summary
@@ -1648,7 +1658,7 @@ class Monitor:
 
     def _collector_findings(self, minute: datetime) -> list[Finding]:
         self.book_evidence = {}
-        capture = self._capture_finding(datetime.now(UTC))
+        capture = self._capture_finding(minute + timedelta(minutes=1))
         self.condition_states['collector_capture'] = ('collectors_serving', 'Raw-perp capture', capture is None)
         findings = [] if capture is None else [capture]
         findings.extend(self._render_book_findings(datetime.now(UTC)))

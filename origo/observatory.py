@@ -727,19 +727,28 @@ def _current_evidence(current: Document, catalog: Document, frames: Sequence[Obs
                 item['publication_policy'] = {key: policy[key] for key in ('reason', 'grace_seconds', 'lag_seconds') if key in policy}
             outputs.append(item)
     conditions: list[Json] = []
-    if frames and frames[-1]['sampling_slot'] == report.get('sampling_slot'):
+    if isinstance(current.get('monitor_conditions'), list):
+        conditions = list(cast(list[Json], current['monitor_conditions']))
+    elif frames and frames[-1]['sampling_slot'] == report.get('sampling_slot'):
         conditions = [{'id': item['group_id'], 'status': item['status'], 'check': item['check'],
                        'scope': item['scope'], 'keys': list(item['detector_keys'])}
                       for item in frames[-1]['observations']
                       if item['kind'] == 'condition' and item['status'] in ('FAIL', 'UNKNOWN')
+                      and item['check'] in _CHECK_NAMES
                       and not item['group_id'].startswith(('law.', 'law:', 'publication:'))]
     gates = [*_objects(report.get('gates')), *_objects(current.get('operational_gates'))]
     events: list[Json] = []
-    if frames:
+    if isinstance(current.get('notification_events'), list):
+        events = list(cast(list[Json], current['notification_events']))
+    elif frames:
         events = [{'scope': item['scope'], 'check': item['check']}
                   for item in frames[-1]['observations']
                   if item['kind'] == 'event_stream' and item['status'] == 'FAIL']
-    return {'sources': sources, 'outputs': outputs, 'conditions': conditions, 'events': events,
+    return {'schema_version': 1, 'sources': sources, 'outputs': outputs, 'conditions': conditions, 'events': events[:8],
+            'event_groups_omitted': (_number(current.get('notification_events_omitted')) or 0) + max(0, len(events) - 8),
+            'sampling_slot': report.get('sampling_slot'), 'catalog_version': report.get('catalog_version'),
+            'observed_at': current.get('checked_at'),
+            'history_incomplete': any(not read['complete'] or read['counts_limited'] for frame in frames[-1:] for read in frame['read_windows'].values()),
             'operations': {str(gate['gate_id']): {'status': gate.get('outcome'), 'evidence': gate.get('evidence')}
                            for gate in gates if str(gate.get('gate_id')).startswith('monitor.')},
             'previous': current.get('previous_email'), 'reason': current.get('reason')}
@@ -771,6 +780,12 @@ def build_summary(current: Document, catalog: Document, history: Sequence[Observ
         'current_evidence': _current_evidence(effective, catalog, frames)}
     for incident in incidents:
         incident['display_lines'] = incident_lines(incident, 4)
+    evidence = summary['current_evidence']
+    events = _objects(evidence.get('events'))
+    evidence['events'] = cast(list[Json], events)
+    while len(json.dumps(summary, separators=(',', ':'), ensure_ascii=False).encode()) > MAX_SUMMARY_BYTES and events:
+        events.pop()
+        evidence['event_groups_omitted'] = (_number(evidence.get('event_groups_omitted')) or 0) + 1
     # Detail yields before identity rows; any truncation remains explicit.
     if len(json.dumps(summary, separators=(',', ':'), ensure_ascii=False).encode()) > MAX_SUMMARY_BYTES:
         for incident in incidents:

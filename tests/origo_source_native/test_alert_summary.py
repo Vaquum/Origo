@@ -159,6 +159,17 @@ def _serving(tmp_path: Path) -> Iterator[tuple[str, page.TapeCache, OperatorSumm
 
 
 def test_dashboard_and_email_share_recorded_summary(tmp_path: Path) -> None:
+    capture = _document(CAPTURES / 'email-brief-20261030.json')
+    raw = (json.dumps({'at': capture['captured_at'], 'data': capture['current']}) + '\n').encode()
+    assert hashlib.sha256(raw).hexdigest() == capture['capture_sha256']
+    catalog_record = page._object(capture['catalog_record'])
+    assert hashlib.sha256(str(catalog_record['text']).encode()).hexdigest() == catalog_record['sha256']
+    for example in page._object(capture['approved_examples']).values():
+        expected = page._object(example)
+        for kind in ('html', 'text'):
+            assert hashlib.sha256(str(expected[kind]).encode()).hexdigest() == page._object(expected['sha256'])[kind]
+    for entry in page._objects(page._object(capture['historical_check_sequence'])['records']):
+        assert hashlib.sha256(str(entry['line']).encode()).hexdigest() == entry['sha256']
     manifest = _document(CAPTURES / 'manifest.json')
     shas: set[str] = set()
     for entry in page._objects(manifest['files']):
@@ -198,6 +209,7 @@ def test_dashboard_and_email_share_recorded_summary(tmp_path: Path) -> None:
 
 
 def test_html_email_matches_dashboard_and_text(tmp_path: Path) -> None:
+    failure_content = _assert_recorded_production_brief()
     with _serving(tmp_path) as (url, _, summary), sync_playwright() as browser_runtime:
         browser = browser_runtime.chromium.launch()
         try:
@@ -221,6 +233,13 @@ def test_html_email_matches_dashboard_and_text(tmp_path: Path) -> None:
                 assert tab.locator('h1').inner_text() in content.text
                 assert '4 / 4' in tab.inner_text('body')
                 tab.screenshot(path=str(tmp_path / f'email-local-preview-{width}.png'), full_page=True)
+                tab.set_content(failure_content.html)
+                assert tab.locator('body').evaluate('(node) => node.scrollWidth <= innerWidth')
+                rendered = ' '.join(tab.inner_text('body').split())
+                for fact in ('5h36m behind', 'Capture continuity is broken.', 'Reader limit 5m', 'File publication limit 3h',
+                             '28 Oct', 'daily archive is missing', '29 Oct', '10:30', '5 / 6', '7 / 9 current', '2 seconds missing on 28 Oct'):
+                    assert fact in rendered and fact in ' '.join(failure_content.text.split())
+                tab.screenshot(path=str(tmp_path / f'email-failure-preview-{width}.png'), full_page=True)
                 tab.close()
         finally:
             browser.close()
@@ -231,14 +250,13 @@ def test_html_email_matches_dashboard_and_text(tmp_path: Path) -> None:
     assert hostile['delivery_status'] in content.text
     assert 'Dashboard link not configured.' in content.text
     assert 'Dagit check write did not succeed' in content.text
-    assert ('Historical detail omitted:' in content.text) is bool(hostile['omitted_groups'])
+    assert ('Detail omitted:' in content.text) is bool(hostile['omitted_groups'])
     hostile['delivery_status'] *= 10000
     with pytest.raises(ValueError, match='64 KiB'):
         render_email(hostile, dashboard_url=None, dagit_written=True)
-    _assert_recorded_production_brief()
 
 
-def _assert_recorded_production_brief() -> None:
+def _assert_recorded_production_brief() -> delivery.EmailContent:
     """Current failures survive missing historical rows; both reader and file limits remain distinct."""
     capture = _document(CAPTURES / 'email-brief-20261030.json')
     current = page._object(capture['current'])
@@ -258,7 +276,9 @@ def _assert_recorded_production_brief() -> None:
         'read_windows': {}, 'observations': [observation], 'omitted_groups': 0, 'complete': True,
     }
     now = datetime.fromisoformat(str(current['checked_at']))
-    summary = build_summary(current, cast(Document, build_catalog(str(capture['deployed_sha']))), [frame], now=now)
+    catalog = cast(Document, json.loads(str(page._object(capture['catalog_record'])['text'])))
+    assert catalog['version'] == report['catalog_version']
+    summary = build_summary(current, catalog, [frame], now=now)
     # Deliberate summary-omission fault: current evidence must not depend on retained incident rows.
     summary['incidents'] = []
     summary['omitted_groups'] = original['omitted_groups']
@@ -272,8 +292,46 @@ def _assert_recorded_production_brief() -> None:
     assert '2 seconds missing on 28 Oct' in content.text
     assert content.html.count('data-source="binance_perp_trades"') == 1
     assert content.html.count('data-source="binance_perp_aggtrades"') == 1
+    assert content.html.index('data-source="binance_perp_trades"') < content.html.index('data-source="binance_perp_aggtrades"')
+    assert content.text.index('5h36m behind') < content.text.index('daily archive is missing') < content.text.index('Expected wait.') < content.text.index('Historical gap.')
     assert max(len(content.html.encode()), len(content.text.encode())) <= BODY_BYTES
     assert len(json.dumps(summary, separators=(',', ':')).encode()) <= 16 * 1024
+    # Deliberate missing-field and snapshot-binding faults never inherit a green historical value.
+    for missing in ('reader_end', 'age_seconds', 'budget_seconds'):
+        incomplete = copy.deepcopy(current)
+        feed = next(item for item in page._objects(page._object(incomplete['last_report'])['feeds']) if item['source_key'] == 'binance_perp_trades')
+        page._object(page._object(page._object(feed['predicates'])['R1'])['evidence']).pop(missing)
+        faulted = build_summary(incomplete, catalog, [], now=now)
+        rendered = render_email(faulted, dashboard_url=None, dagit_written=True)
+        assert not rendered.subject.endswith('live data is current')
+        if missing == 'age_seconds':
+            assert '5h36m behind' not in rendered.subject
+        elif missing == 'budget_seconds':
+            assert 'Reader limit 5m' not in rendered.text
+        else:
+            assert 'Readable data ends at' not in rendered.text
+    mismatched = copy.deepcopy(summary)
+    mismatched['current_evidence']['sampling_slot'] = None
+    assert 'Current status cannot be verified' in render_email(mismatched, dashboard_url=None, dagit_written=True).text
+    # Protocol overload repeats a captured event envelope and scope, without inventing
+    # market observations. Even an admitted large frame must yield detail before current failures.
+    record = page._objects(page._object(capture['historical_check_sequence'])['records'])[0]
+    crowded, _ = observatory.decode_observation_record(str(record['line']).encode())
+    event = next(item for item in crowded['observations'] if item['kind'] == 'event_stream' and item['status'] == 'FAIL')
+    event['scope'] *= 80
+    crowded['sampling_slot'] = frame['sampling_slot']
+    crowded.pop('notification_transitions', None)
+    crowded['observations'] = [copy.deepcopy(event) for _ in range(64)]
+    encoded = monitor_module._NotificationHistory.encode(crowded, None)
+    admitted, _ = observatory.decode_observation_record(encoded)
+    assert len(admitted['observations']) > 8 and len(encoded) <= 8192
+    bounded = build_summary(current, catalog, [admitted], now=now)
+    assert len(json.dumps(bounded, separators=(',', ':')).encode()) <= 16 * 1024
+    assert bounded['current_evidence']['event_groups_omitted']
+    retained = render_email(bounded, dashboard_url='https://origo.vaquum.fi/law', dagit_written=True)
+    for source in ('binance_perp_trades', 'binance_perp_aggtrades'):
+        assert f'data-source="{source}"' in retained.html and f'source={source}' in retained.text
+    return content
 
 
 def _assert_missing_current_measurement_has_no_trend() -> None:
@@ -553,7 +611,66 @@ def _assert_digest_loss_uses_evidence_slots(tmp_path: Path) -> None:
         assert pending['evidence_end'] == summary['sampling_slot']
 
 
+def _assert_historical_verification_waits_for_digest(tmp_path: Path) -> None:
+    """Genuine FAIL/limited-read churn cannot use an open hourly slot after cursor reload."""
+    capture = _document(CAPTURES / 'email-brief-20261030.json')
+    group = 'check_failed:reconcile_binance_perp_top20_v1_source_origo:source_health'
+    recorded: dict[str, ObservationFrame] = {}
+    for row in page._objects(page._object(capture['historical_check_sequence'])['records']):
+        frame, _ = observatory.decode_observation_record(str(row['line']).encode())
+        # Project the actual group and retain its original recorded transitions and read limits.
+        frame['observations'] = [item for item in frame['observations'] if item['group_id'] == group]
+        frame['notification_transitions'] = [item for item in frame.get('notification_transitions', []) if item['group_id'] == group]
+        assert frame['read_windows']['check_failed']['counts_limited'] is True
+        recorded[frame['sampling_slot'][11:16]] = frame
+
+    def clock(frame: ObservationFrame) -> datetime:
+        return datetime.fromisoformat(str(frame['read_windows']['check_failed']['window_end']))
+
+    def summary(frames: list[ObservationFrame]) -> OperatorSummary:
+        last = frames[-1]
+        # Mail-envelope protocol only: no current market values are invented for historical frames.
+        current: Document = {'checked_at': clock(last).isoformat(), 'last_report': {
+            'sampling_slot': last['sampling_slot'], 'catalog_version': last['catalog_version']}}
+        return build_summary(current, {'version': last['catalog_version']}, frames, now=clock(last))
+
+    settings = _settings(digest_hour_utc=23)
+    path = tmp_path / 'historical-verification.json'
+    first = recorded['17:53']
+    cursor = _cursor(path, clock(first))
+    initial = first['notification_transitions'][0]
+    assert initial['description'] == 'Ongoing · Verification restored'
+    assert monitor_module.notification_change(initial, event_stream=True)
+    assert plan_notification(cursor, summary([first]), settings, clock(first), True, transitions=True)
+
+    def acknowledge(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        assert payload and api_key and api_url and idempotency_key
+        return 'local-protocol-ack'
+
+    assert attempt_delivery(cursor, settings, clock(first), lambda: cursor.save(path),
+                            completion_clock=lambda: clock(first), sender=acknowledge) == 'acknowledged'
+    replay = [first, recorded['17:54'], recorded['18:54']]
+    later = clock(replay[-1])
+    restored = _cursor(path, later)
+    assert later.timestamp() >= restored.next_distinct_at, 'This boundary must be open, not throttled.'
+    changes = [item for frame in replay for item in frame.get('notification_transitions', [])
+               if item['sampling_slot'] > str(restored.notified_through)]
+    assert changes and any(item['verification'] == 'unverified' for item in changes)
+    assert not any(monitor_module.notification_change(item, event_stream=True) for item in changes)
+    assert not plan_notification(restored, summary(replay), settings, later, True, transitions=False)
+    assert restored.pending_notification is None
+    due = later.replace(hour=23)
+    assert plan_notification(restored, summary(replay), settings, due, True, transitions=False)
+    assert restored.pending_notification is not None and restored.pending_notification.get('digest_date') == due.date().isoformat()
+    # Another genuine failure in the existing episode still initiates mail, independently of a digest.
+    existing = [recorded['10:32'], recorded['10:33'], recorded['17:53']]
+    notices = [item for item in lifecycle_transitions(existing, now=clock(existing[-1]))
+               if item['sampling_slot'] == existing[-1]['sampling_slot']]
+    assert notices and all(monitor_module.notification_change(item, event_stream=True) for item in notices)
+
+
 def test_all_notifications_obey_global_hourly_budget(tmp_path: Path) -> None:
+    _assert_historical_verification_waits_for_digest(tmp_path)
     _assert_digest_loss_uses_evidence_slots(tmp_path)
     # Clock inputs exercise scheduling only; the captured operator observations remain unchanged.
     summary, start = _summary(), _now().replace(hour=6, minute=40, second=0, microsecond=0)
@@ -721,9 +838,9 @@ class _ReplayReporter(Reporter):
         return True
 
 
-def _monitor_with_recorded_reads(root: Path, monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> Monitor:
+def _monitor_with_recorded_reads(root: Path, monkeypatch: pytest.MonkeyPatch, calls: list[str], *, capture_name: str = 'current.json') -> Monitor:
     """Replay captured read results; inject only storage/transport behavior, with no production probes."""
-    report = page._object(_document(CAPTURES / 'current.json')['last_report'])
+    report = page._object(_document(CAPTURES / capture_name)['last_report'])
     monkeypatch.setattr(monitor_module, 'LAW_INVENTORY', tuple(report['inventory']))
     monitor = object.__new__(Monitor)
     monitor.catalog = cast(LawCatalog, _document(CAPTURES / 'catalog.json'))

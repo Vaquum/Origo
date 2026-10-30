@@ -46,6 +46,8 @@ def _date(value: object, pattern: str = '%d %b') -> str:
 
 def _name(value: object) -> str:
     words = str(value or 'Unknown source').replace('_', ' ')
+    if words.startswith('binance '):
+        words = 'Binance ' + words.removeprefix('binance ')
     return re.sub(r'\bperp\b', 'perpetual', words, flags=re.IGNORECASE).replace('aggtrades', 'aggregate trades').replace(' v1', '')
 
 
@@ -64,7 +66,7 @@ class Issue:
 
 def _issues(facts: Document) -> tuple[list[Issue], list[str], list[str]]:
     issues: dict[str, Issue] = {}
-    waits: dict[tuple[str, str, str], list[str]] = {}
+    waits: dict[tuple[str, str, str, str], list[str]] = {}
     notes: list[str] = []
     sources = _objects(facts.get('sources'))
     outputs = _objects(facts.get('outputs'))
@@ -78,7 +80,7 @@ def _issues(facts: Document) -> tuple[list[Issue], list[str], list[str]]:
             status = _status(result.get('status'))
             if status == 'EXPECTED_WAIT' and result.get('deadline'):
                 identity = (str(result.get('day') or result.get('hour') or ''), str(result['deadline']),
-                            'perpetual' if '_perp_' in key else 'spot' if '_spot_' in key else '')
+                            'perpetual' if '_perp_' in key else 'spot' if '_spot_' in key else '', str(result.get('canonical_interval') or ''))
                 waits.setdefault(identity, []).append(name)
             if status not in ('FAIL', 'UNKNOWN'):
                 continue
@@ -97,7 +99,7 @@ def _issues(facts: Document) -> tuple[list[Issue], list[str], list[str]]:
                 if family == 'M1':
                     issue.lines.append('The market state cube failed its current-data check.')
                 elif age is None or age <= (_number(result.get('budget_seconds')) or 0):
-                    issue.lines.append('Live coverage failed its data check: ' + str(result.get('reason')).replace('_', ' ') + '.')
+                    issue.lines.append('Live coverage failed validation.' if status == 'FAIL' else 'Live coverage cannot be verified.')
                 issue.action = 'Check ingestion and publication failures in Dagit.'
             elif family in ('C1', 'C2'):
                 missing = result.get('first_invalid_day') or result.get('first_invalid_hour') or result.get('day') or result.get('hour')
@@ -106,11 +108,12 @@ def _issues(facts: Document) -> tuple[list[Issue], list[str], list[str]]:
                     unit = 'hourly' if 'hour' in reason or result.get('canonical_interval') == 'hour' else 'daily'
                     issue.lines.append(f'The {_date(missing, "%d %b %H:%M" if unit == "hourly" else "%d %b")} {unit} archive is missing.')
                 else:
-                    issue.lines.append('Archive evidence: ' + reason.replace('_', ' ') + '.')
+                    issue.lines.append('Archive validation failed.' if status == 'FAIL' else 'Archive evidence is unavailable.')
                 issue.priority = min(issue.priority, 1)
                 issue.action = 'Check the archive failure and provider availability in Dagit.'
             else:
-                issue.lines.append(f'{family}: ' + str(result.get('reason') or 'evidence unavailable').replace('_', ' ') + '.')
+                label = {'M2': 'Market state history', 'D1': 'Depth minute coverage'}.get(family, 'Data validation')
+                issue.lines.append(f'{label} failed validation.' if status == 'FAIL' else f'{label} cannot be verified.')
         if key in issues and r1.get('status') == 'PASS':
             issues[key].lines.append('Live data is current.')
         history = _object(predicates.get('C2'))
@@ -148,6 +151,16 @@ def _issues(facts: Document) -> tuple[list[Issue], list[str], list[str]]:
         if 'CAPTURE_OVERLAP_BREAK' in text:
             issue.lines.insert(0, 'Capture continuity is broken.')
             issue.action = 'Check capture and repair failures in Dagit.'
+        elif identity == 'dagster_unreachable':
+            issue.label = 'Dagit availability'
+            issue.lines.append('Dagit is unreachable.')
+            issue.action = 'Check the Dagit service logs in ClickHouse.'
+        elif identity.startswith('heartbeat_stale:'):
+            issue.lines.append('Worker heartbeat is missing or stale.')
+            issue.action = 'Check origo_monitor:workers_alive in Dagit.'
+        elif identity.startswith('detector_failed:'):
+            issue.lines.append('Monitor evidence is unavailable for this check.')
+            issue.action = 'Check origo_monitor:' + str(condition.get('check')) + ' in Dagit.'
         else:
             issue.lines.append(str(condition.get('check')).replace('_', ' ').capitalize() + ': ' + text.replace('_', ' ') + '.')
     operations = _object(facts.get('operations'))
@@ -165,8 +178,8 @@ def _issues(facts: Document) -> tuple[list[Issue], list[str], list[str]]:
             issues.setdefault(check, Issue(check, _name(check).capitalize(), str(result['status']),
                                           ['Check the latest origo_monitor evaluation in Dagit.'],
                                           target={'view': 'overview', 'overview': 'queue' if check in ('queue_bounded', 'dagster_reachable') else 'workers' if check == 'workers_alive' else 'collectors'}))
-    waiting = [f'The {_date(day)} {market + " " if market else ""}daily archives are due at {_date(deadline, "%H:%M")}. No action required.'
-               for (day, deadline, market), names in waits.items() if names]
+    waiting = [f'The {_date(day, "%d %b %H:%M" if interval == "hour" else "%d %b")} {market + " " if market else ""}{"hourly " if interval == "hour" else "daily " if interval == "day" else ""}archive{"s are" if len(names) > 1 else " is"} due at {_date(deadline, "%H:%M")}. No action required.'
+               for (day, deadline, market, interval), names in waits.items() if names]
     return sorted(issues.values(), key=lambda item: (item.status != 'FAIL', item.priority, -(item.age or 0), item.key)), waiting, notes
 
 
@@ -182,16 +195,18 @@ def render_brief(summary: OperatorSummary, *, dashboard_url: str | None, dagit_w
     issues, waits, notes = _issues(facts)
     if summary['status'] == 'FAIL' and not issues:
         issues.append(Issue('data_current', 'Data checks', 'FAIL', ['Check origo_monitor:data_current in Dagit.']))
-    unknown = summary['status'] == 'UNKNOWN' or not facts or bool(facts.get('reason'))
-    if facts.get('reason') or (unknown and not any(issue.status == 'FAIL' for issue in issues)):
+    bound = facts.get('schema_version') == 1 and all(facts.get(key) == summary.get(key) for key in ('sampling_slot', 'catalog_version', 'observed_at'))
+    unknown = summary['status'] == 'UNKNOWN' or not bound or bool(facts.get('reason'))
+    if not bound or facts.get('reason') or (unknown and not any(issue.status == 'FAIL' for issue in issues)):
         headline = 'Current status cannot be verified.'
         lead = 'Check origo_monitor in Dagit.'
         state = 'Verification required'
     elif issues:
         first = issues[0]
         short = first.label.removeprefix('Binance ').capitalize()
-        verb = 'need' if short.endswith('s') else 'needs'
-        headline = f'{short} are {_duration(first.age)} behind.' if first.age is not None else f'{short} {verb} attention.'
+        plural = short.endswith('s')
+        verb = 'need' if plural else 'needs'
+        headline = f'{short} {"are" if plural else "is"} {_duration(first.age)} behind.' if first.age is not None else f'{short} {verb} attention.'
         lead = ' '.join(first.lines[:2])
         state = 'Attention required'
     else:
@@ -248,18 +263,25 @@ def render_brief(summary: OperatorSummary, *, dashboard_url: str | None, dagit_w
     cubes = [_object(_object(source.get('predicates')).get('M1')) for source in sources if 'M1' in _object(source.get('predicates'))]
     metrics = [
         (f'{sum(_object(_object(source.get("predicates")).get("R1")).get("status") == "PASS" for source in live_sources)} / {len(live_sources)}' if live_sources and not unknown else 'Unknown', 'Live sources current'),
-        ('Current' if cubes and all(cube.get('status') == 'PASS' for cube in cubes) and not unknown else 'Failed' if any(cube.get('status') == 'FAIL' for cube in cubes) else 'Unknown', 'Market state cube'),
+        ('Current' if cubes and all(cube.get('status') == 'PASS' for cube in cubes) and not unknown else 'Failed' if not unknown and any(cube.get('status') == 'FAIL' for cube in cubes) else 'Unknown', 'Market state cube'),
         (f'{workers["workers_fresh"]} / {workers["workers_expected"]}' if not unknown and workers.get('workers_fresh') is not None and workers.get('workers_expected') is not None else 'Unknown', 'Workers alive'),
         (str(queue['queued_runs']) if not unknown and dagit.get('reachable') is True and queue.get('queued_runs') is not None else 'Unknown', 'Queued runs'),
     ]
     parts.append('<p style="font-size:10px;letter-spacing:1.6px;color:#788077;margin:25px 0 13px">CURRENT CHECKS</p><table role="presentation" style="width:100%;background:#f3f6f1;padding:15px 10px;table-layout:fixed"><tr>')
     text.append('Current checks')
     for value, label in metrics:
+        metric_color = '#946414' if value == 'Unknown' else '#ac3a2c' if value == 'Failed' else '#315d48'
+        if label == 'Live sources current' and live_sources and sum(_object(_object(source.get('predicates')).get('R1')).get('status') == 'PASS' for source in live_sources) < len(live_sources) and not unknown:
+            metric_color = '#ac3a2c'
+        if label == 'Queued runs' and (_number(queue.get('queued_runs')) or 0) > (_number(queue.get('queue_threshold')) or 0) and not unknown:
+            metric_color = '#ac3a2c'
+        if label == 'Workers alive' and value != 'Unknown' and (_number(workers.get('workers_fresh')) or 0) < (_number(workers.get('workers_expected')) or 0):
+            metric_color = '#ac3a2c'
         text.append(f'{value} · {label}')
-        parts.append(f'<td style="vertical-align:top;padding:0 5px"><b style="font-size:14px;color:#315d48">{html.escape(value)}</b><br><span style="font-size:10px;color:#6c796b">{label}</span></td>')
+        parts.append(f'<td style="vertical-align:top;padding:0 5px"><b style="font-size:14px;color:{metric_color}">{html.escape(value)}</b><br><span style="font-size:10px;color:#6c796b">{label}</span></td>')
     parts.append('</tr></table>')
     outputs = _objects(facts.get('outputs'))
-    states = [_publication_status(output) for output in outputs]
+    states = ['UNKNOWN' if unknown else _publication_status(output) for output in outputs]
     if states:
         failures = [output for output in outputs if _publication_status(output) == 'FAIL']
         label = 'delayed' if failures and all(_object(output.get('publication_policy')).get('reason') == 'stale' for output in failures) else 'failed'
@@ -282,10 +304,10 @@ def render_brief(summary: OperatorSummary, *, dashboard_url: str | None, dagit_w
     else:
         paragraph('Dashboard link not configured.')
     paragraph('Checks recorded in Dagit.' if dagit_written else 'Dagit check write did not succeed. Check origo_monitor in Dagit.', style='font-size:10px;color:#727d70')
-    if not summary['coverage']['complete'] or any(incident['kind'] == 'event_stream' and incident['status'] == 'UNKNOWN' for incident in summary['incidents']):
-        paragraph('Historical event evidence incomplete.', style='font-size:10px;color:#727d70')
+    if not summary['coverage']['complete'] or facts.get('history_incomplete') or any(incident['kind'] == 'event_stream' and incident['status'] == 'UNKNOWN' for incident in summary['incidents']):
+        paragraph('History incomplete.', style='font-size:10px;color:#727d70')
     if summary['omitted_groups']:
-        paragraph(f'Historical detail omitted: {summary["omitted_groups"]} recorded groups.', style='font-size:10px;color:#727d70')
+        paragraph(f'Detail omitted: {summary["omitted_groups"]} recorded groups.', style='font-size:10px;color:#727d70')
     status = summary['delivery_status']
     if status and status not in ('idle', 'Not recorded', 'recorded', 'acknowledged'):
         paragraph(status, style='font-size:10px;color:#727d70')

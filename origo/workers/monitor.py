@@ -89,6 +89,7 @@ from origo.observatory import (
     Json,
     Measurement,
     NotificationObservation,
+    NotificationTransition,
     ObservationFrame,
     ObservedRead,
     OperatorSummary,
@@ -182,6 +183,12 @@ class Finding:
     check: CheckName
     title: str
     detail: str
+
+
+def notification_change(transition: NotificationTransition, *, event_stream: bool = False) -> bool:
+    if event_stream or transition['group_id'].startswith(('check_failed:', 'run_failure:', 'receipt_failed:', 'error_logs:')):
+        return transition['description'] == 'New historical event episode'
+    return transition['verification'] != 'expected_wait'
 
 
 
@@ -944,11 +951,23 @@ class Monitor:
         prune_unsent(cursor, now)
         try:
             cursor.save(self.cursor_path)
-            summary = self._notification_summary(report, now, delivery_status, history)
             floor = cursor.notified_through or ''
-            changed = any(transition['sampling_slot'] > floor for frame in history for transition in frame.get('notification_transitions', []))
+            event_groups = {item['group_id'] for frame in history for item in frame['observations'] if item['kind'] == 'event_stream'}
+            changes = [transition for frame in history for transition in frame.get('notification_transitions', [])
+                       if transition['sampling_slot'] > floor and notification_change(transition, event_stream=transition['group_id'] in event_groups)]
+            previous_mail: Document = {}
+            if cursor.last_delivery and cursor.notified_through is not None and cursor.notified_through in self.notification_history.briefs:
+                prior = self.notification_history.briefs[cursor.notified_through]
+                previous_mail = {'at': datetime.fromtimestamp(cursor.last_delivery['completed_at'], UTC).isoformat(),
+                            'ages': prior.get('ages')}
+            summary = self._notification_summary(report, now, delivery_status, history, previous=previous_mail)
+            events: dict[str, Json] = {item['group_id']: {'scope': item['group_id'], 'at': item['sampling_slot']}
+                      for item in changes if item['group_id'].startswith(('check_failed:', 'run_failure:', 'receipt_failed:', 'error_logs:'))}
+            evidence = summary.setdefault('current_evidence', {})
+            evidence['events'] = list(events.values())[-8:]
+            evidence['event_groups_omitted'] = max(0, len(events) - 8)
             delivery_now = now + timedelta(seconds=max(0.0, time.monotonic() - tick_started))
-            if not cursor.notification_fault and self.settings is not None and plan_notification(cursor, summary, self.settings, delivery_now, written, transitions=changed):
+            if not cursor.notification_fault and self.settings is not None and plan_notification(cursor, summary, self.settings, delivery_now, written, transitions=bool(changes)):
                 cursor.save(self.cursor_path)
                 delivery_status = self._resume_notification(cursor, delivery_now)
             summary['delivery_status'] = delivery_status
@@ -1338,7 +1357,7 @@ class Monitor:
             observations=ordered, omitted_groups=0, complete=all(reads.values()),
         )
 
-    def _notification_summary(self, report: LawReport | None, now: datetime, status: str, history: Sequence[ObservationFrame]) -> OperatorSummary:
+    def _notification_summary(self, report: LawReport | None, now: datetime, status: str, history: Sequence[ObservationFrame], *, previous: Document | None = None) -> OperatorSummary:
         briefs = self.notification_history.briefs
         terminal = report['sampling_slot'] if report else None
         clear = consecutive_window(list(briefs.values()), terminal or '')
@@ -1357,6 +1376,7 @@ class Monitor:
             'consecutive_clear_seconds': clear_seconds,
             'consecutive_clear_slots': len(clear),
             'not_due_slots': sum(item.get('not_due') is True for item in clear),
+            'previous_email': previous,
         }
         summary = build_summary(current, cast(Document, self.catalog) if self.catalog else {}, history, now=now)
         return summary
@@ -1628,7 +1648,7 @@ class Monitor:
 
     def _collector_findings(self, minute: datetime) -> list[Finding]:
         self.book_evidence = {}
-        capture = self._capture_finding(minute + timedelta(minutes=1))
+        capture = self._capture_finding(datetime.now(UTC))
         self.condition_states['collector_capture'] = ('collectors_serving', 'Raw-perp capture', capture is None)
         findings = [] if capture is None else [capture]
         findings.extend(self._render_book_findings(datetime.now(UTC)))

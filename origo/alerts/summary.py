@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import html
 import json
 import logging
 import math
@@ -12,21 +11,13 @@ import time
 import urllib.parse
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal, NotRequired, Protocol, TypedDict, cast
 
 from origo.alerts.email import REQUEST_TIMEOUT_SECONDS, AlertSettings, DeliveryError, send_alert
-from origo.observatory import (
-    THEME,
-    Incident,
-    OperatorSummary,
-    SummaryCard,
-    badge,
-    coverage_text,
-    incident_lines,
-    incident_rank,
-)
+from origo.alerts.brief import render_brief
+from origo.observatory import OperatorSummary
 
 BODY_BYTES = 64 * 1024
 CURSOR_BYTES = 256 * 1024
@@ -115,183 +106,13 @@ def dashboard_link(base: str | None, target: dict[str, object]) -> str | None:
     return base + ('?' + urllib.parse.urlencode(parameters) if parameters else '')
 
 
-def _subject(incidents: list[Incident]) -> str:
-    if not incidents:
-        return 'Origo: operator summary'
-    lead = incidents[0]
-    if lead['lifecycle'] == 'recovered':
-        prefix = 'Recovery' if lead['had_eligible_failure'] else 'Verification restored'
-    elif lead['status'] == 'UNKNOWN':
-        prefix = 'Unverified'
-    elif lead['status'] == 'EXPECTED_WAIT':
-        prefix = 'Expected wait'
-    else:
-        prefix = str(lead['lifecycle']).replace('_', ' ').capitalize()
-    return ' '.join(f'Origo {prefix}: {lead["label"]}'.split())[:240]
-
-
-def _card_lines(card: SummaryCard) -> list[str]:
-    return [
-        card['label'],
-        f'{card["value"]} {card["unit"]} · {card["badge"]}'.strip(),
-        card['explanation'],
-        coverage_text(card['coverage']),
-        card['trend']['description'],
-    ]
-
-
-def _paragraph(line: str, *, strong: bool = False) -> str:
-    escaped = html.escape(line)
-    if strong:
-        escaped = f'<strong>{escaped}</strong>'
-    return f'<p style="margin:6px 0;line-height:1.5">{escaped}</p>'
-
-
-def _render(
-    summary: OperatorSummary,
-    incidents: list[Incident],
-    total: int,
-    detail: int,
-    *,
-    dashboard_url: str | None,
-    dagit_written: bool,
-) -> EmailContent:
-    prepared_at = str(summary.get('prepared_at', summary['sampling_slot'] or 'Not recorded'))
-    observed_at = summary['observed_at'] or 'Not recorded'
-    evidence_age = 'Not recorded'
-    if summary['observed_at']:
-        try:
-            age = (
-                datetime.fromisoformat(prepared_at) - datetime.fromisoformat(summary['observed_at'])
-            ).total_seconds()
-        except ValueError:
-            evidence_age = 'Not recorded'
-        else:
-            evidence_age = f'{max(0, int(age))} seconds'
-    omitted = total - len(incidents)
-    capture_omitted = summary['omitted_groups']
-    unknown_count = sum(incident['status'] == 'UNKNOWN' for incident in summary['incidents'])
-    total_label = (
-        str(total + capture_omitted) if capture_omitted is not None else f'at least {total}'
-    )
-    omitted_label = (
-        str(omitted + capture_omitted)
-        if capture_omitted is not None
-        else f'at least {omitted}; additional groups unknown'
-    )
-    header = [
-        'ORIGO',
-        'Operator summary · snapshot',
-        f'Data laws: {badge(summary["status"])}',
-        f'Observed: {observed_at} · prepared: {prepared_at}',
-        f'Evidence age: {evidence_age} · times and coverage in UTC',
-        coverage_text(summary['coverage']),
-        f'Recorded groups: {total_label}; unverified groups in available summary: {unknown_count}; included: {len(incidents)}.',
-        f'Omitted recorded groups: {omitted_label}.',
-        'Dagit checks recorded.'
-        if dagit_written
-        else 'Dagit check write did not succeed; investigate origo_monitor in Dagit when available.',
-    ]
-    if capture_omitted is None or not summary['coverage']['complete']:
-        header.append(
-            'History is incomplete; counts are observed subtotals and omitted groups may be unknown.'
-        )
-    if summary['delivery_status']:
-        header.append(summary['delivery_status'])
-    if dashboard_url is None:
-        header.append('Dashboard link not configured.')
-    text_parts = ['\n'.join(header)]
-    html_parts = [
-        '<!doctype html><html><body style="margin:0;padding:16px;background:'
-        + THEME['paper']
-        + ';color:'
-        + THEME['ink']
-        + ';font-family:Arial,Helvetica,sans-serif">',
-        '<div style="max-width:720px;margin:auto">',
-        ''.join(_paragraph(line, strong=index < 2) for index, line in enumerate(header)),
-    ]
-    if dashboard_url:
-        safe_url = html.escape(dashboard_url, quote=True)
-        html_parts.append(
-            f'<p><a style="color:{THEME["blue"]}" href="{safe_url}">Open law dashboard</a></p>'
-        )
-        text_parts.append('Open law dashboard: ' + dashboard_url)
-    for card in summary['cards']:
-        lines = _card_lines(card)
-        text_parts.append('\n'.join(line for line in lines if line))
-        color = (
-            THEME['red']
-            if card['status'] == 'FAIL'
-            else THEME['green']
-            if card['status'] == 'PASS'
-            else THEME['amber']
-        )
-        html_parts.append(
-            f'<div style="margin:12px 0;padding:16px;border:1px solid {THEME["line"]};border-left:4px solid {color};background:#fff">'
-        )
-        html_parts.append(_paragraph(lines[0], strong=True))
-        html_parts.append(
-            f'<p style="font-size:25px;font-variant-numeric:tabular-nums;margin:8px 0;color:{color}">{html.escape(lines[1])}</p>'
-        )
-        html_parts.extend(_paragraph(line) for line in lines[2:] if line)
-        link = dashboard_link(dashboard_url, cast(dict[str, object], card['target']))
-        if link:
-            html_parts.append(
-                f'<a style="color:{THEME["blue"]}" href="{html.escape(link, quote=True)}">Open evidence</a>'
-            )
-            text_parts.append('Open evidence: ' + link)
-        html_parts.append('</div>')
-    html_parts.append('<h2 style="font-size:20px;margin:24px 0 12px">Observed incidents</h2>')
-    text_parts.append('Observed incidents')
-    for incident in incidents:
-        lines = incident_lines(incident, detail)
-        text_parts.append('\n'.join(lines))
-        html_parts.append(
-            f'<div data-group-id="{html.escape(incident["group_id"], quote=True)}" style="padding:12px 0;border-top:1px solid {THEME["line"]}">'
-        )
-        html_parts.extend(_paragraph(line, strong=index == 0) for index, line in enumerate(lines))
-        html_parts.append('</div>')
-    if not incidents:
-        text_parts.append('No incident rows included in this snapshot.')
-        html_parts.append(_paragraph('No incident rows included in this snapshot.'))
-    html_parts.append('</div></body></html>')
-    return EmailContent(
-        _subject(sorted(summary['incidents'], key=incident_rank)),
-        ''.join(html_parts),
-        '\n\n'.join(text_parts) + '\n',
-    )
-
-
 def render_email(
     summary: OperatorSummary,
     *,
     dashboard_url: str | None,
     dagit_written: bool,
 ) -> EmailContent:
-    incidents = sorted(summary['incidents'], key=incident_rank)
-    for detail in (8, 2, 0):
-        content = _render(
-            summary,
-            incidents,
-            len(incidents),
-            detail,
-            dashboard_url=dashboard_url,
-            dagit_written=dagit_written,
-        )
-        if max(len(content.html.encode()), len(content.text.encode())) <= BODY_BYTES:
-            return content
-    for count in range(len(incidents) - 1, -1, -1):
-        content = _render(
-            summary,
-            incidents[:count],
-            len(incidents),
-            0,
-            dashboard_url=dashboard_url,
-            dagit_written=dagit_written,
-        )
-        if max(len(content.html.encode()), len(content.text.encode())) <= BODY_BYTES:
-            return content
-    raise ValueError('Email fixed summary content exceeds 64 KiB; no delivery prepared.')
+    return EmailContent(*render_brief(summary, dashboard_url=dashboard_url, dagit_written=dagit_written))
 
 
 def _iso(timestamp: float) -> str:
@@ -369,6 +190,7 @@ def plan_notification(
     disclosed = [interval.copy() for interval in cursor.lost_intervals]
     prepared = summary.copy()
     prepared['prepared_at'] = utc_now.isoformat()
+    prepared['digest'] = digest_due
     disclosures = [prepared['delivery_status']]
     if settings.dashboard_url_fault:
         disclosures.append(settings.dashboard_url_fault)
@@ -380,8 +202,6 @@ def plan_notification(
     content = render_email(
         prepared, dashboard_url=settings.public_dashboard_url, dagit_written=dagit_written
     )
-    if digest_due:
-        content = replace(content, subject=f'Origo daily digest {today}')
     payload = json.dumps(
         {
             'from': settings.email_from,

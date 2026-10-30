@@ -178,11 +178,10 @@ def test_dashboard_and_email_share_recorded_summary(tmp_path: Path) -> None:
         expected = [*LAW_NAMES.values(), 'Published outputs', 'Worker heartbeats', 'Queued runs',
                     'Collectors serving', 'Error lines · observed / 60m', 'Clear data-law observations']
         assert [card['label'] for card in summary['cards']] == expected
-        for card in summary['cards']:
-            assert card['label'] in content.text and html.escape(card['label']) in content.html
-            assert card['value'] in content.text and card['badge'] in content.text
-        for sentence in LAW_COPY.values():
-            assert sentence in content.text and html.escape(sentence) in content.html
+        assert '4 / 4' in content.text and 'Live sources current' in content.text
+        assert 'Operator summary · snapshot' not in content.text
+        assert 'Trend unavailable' not in content.text
+        assert summary['current_evidence']['sources']
         for position, family in enumerate(LAW_NAMES):
             assert summary['cards'][position]['id'] == family
         assert summary['cards'][0]['value'] == '4 / 4'
@@ -218,9 +217,9 @@ def test_html_email_matches_dashboard_and_text(tmp_path: Path) -> None:
                 tab.set_content(content.html)
                 assert tab.locator('body').evaluate('(node) => node.scrollWidth <= innerWidth')
                 assert tab.locator('script, img').count() == 0
-                assert tab.locator('body').evaluate('(node) => getComputedStyle(node).color') == 'rgb(23, 43, 54)'
-                for card in summary['cards']:
-                    assert card['label'] in tab.inner_text('body')
+                assert tab.locator('body').evaluate('(node) => getComputedStyle(node).color') == 'rgb(37, 42, 39)'
+                assert tab.locator('h1').inner_text() in content.text
+                assert '4 / 4' in tab.inner_text('body')
                 tab.screenshot(path=str(tmp_path / f'email-local-preview-{width}.png'), full_page=True)
                 tab.close()
         finally:
@@ -232,12 +231,49 @@ def test_html_email_matches_dashboard_and_text(tmp_path: Path) -> None:
     assert hostile['delivery_status'] in content.text
     assert 'Dashboard link not configured.' in content.text
     assert 'Dagit check write did not succeed' in content.text
-    assert 'Omitted recorded groups:' in content.text
-    for key in ('ink', 'paper', 'green'):
-        assert THEME[key] in content.html
+    assert ('Historical detail omitted:' in content.text) is bool(hostile['omitted_groups'])
     hostile['delivery_status'] *= 10000
     with pytest.raises(ValueError, match='64 KiB'):
         render_email(hostile, dashboard_url=None, dagit_written=True)
+    _assert_recorded_production_brief()
+
+
+def _assert_recorded_production_brief() -> None:
+    """Current failures survive missing historical rows; both reader and file limits remain distinct."""
+    capture = _document(CAPTURES / 'email-brief-20261030.json')
+    current = page._object(capture['current'])
+    report = page._object(current['last_report'])
+    original = page._object(current['operator_summary'])
+    incident = next(item for item in page._objects(original['incidents']) if item['group_id'] == 'collector_capture')
+    observation: NotificationObservation = {
+        'group_id': str(incident['group_id']), 'check': 'collectors_serving', 'scope': 'Raw-perp capture',
+        'kind': 'condition', 'status': 'FAIL', 'definition_version': str(report['catalog_version']),
+        'detector_keys': [str(item) for item in cast(list[Json], incident['evidence_refs'])],
+        'eligible': True, 'read_window_key': None, 'measurements': [], 'evidence_refs': [], 'complete': True,
+    }
+    frame: ObservationFrame = {
+        'sampling_slot': str(report['sampling_slot']), 'catalog_version': str(report['catalog_version']),
+        'law_sample_ref': str(original['law_sample_ref']), 'law_observed': True,
+        'checks_complete': {'data_current': True, 'collectors_serving': True},
+        'read_windows': {}, 'observations': [observation], 'omitted_groups': 0, 'complete': True,
+    }
+    now = datetime.fromisoformat(str(current['checked_at']))
+    summary = build_summary(current, cast(Document, build_catalog(str(capture['deployed_sha']))), [frame], now=now)
+    # Deliberate summary-omission fault: current evidence must not depend on retained incident rows.
+    summary['incidents'] = []
+    summary['omitted_groups'] = original['omitted_groups']
+    content = render_email(summary, dashboard_url='https://origo.vaquum.fi/law', dagit_written=True)
+    assert '5h36m behind' in content.subject
+    assert 'Capture continuity is broken.' in content.text
+    assert 'Reader limit 5m' in content.text and 'File publication limit 3h' in content.text
+    assert '28 Oct' in content.text and 'daily archive is missing' in content.text
+    assert '29 Oct' in content.text and '10:30' in content.text and 'No action required' in content.text
+    assert '5 / 6' in content.text and '7 / 9 current' in content.text
+    assert '2 seconds missing on 28 Oct' in content.text
+    assert content.html.count('data-source="binance_perp_trades"') == 1
+    assert content.html.count('data-source="binance_perp_aggtrades"') == 1
+    assert max(len(content.html.encode()), len(content.text.encode())) <= BODY_BYTES
+    assert len(json.dumps(summary, separators=(',', ':')).encode()) <= 16 * 1024
 
 
 def _assert_missing_current_measurement_has_no_trend() -> None:
@@ -356,8 +392,9 @@ def _assert_quiet_event_verification_transition() -> None:
     assert [(event['sampling_slot'], event['description']) for event in transitions] == [
         (frames[0]['sampling_slot'], 'New · Unverified'),
         (frames[1]['sampling_slot'], 'Verification restored · No further events observed'),
-    ], 'A successful quiet read must notify restored verification exactly once.'
+    ], 'A successful quiet read records restored verification exactly once.'
     assert all(event['lifecycle'] != 'recovered' for event in transitions)
+    assert not any(monitor_module.notification_change(event, event_stream=True) for event in transitions)
 
 
 def _assert_quiet_event_does_not_promise_recovery() -> None:
@@ -468,7 +505,7 @@ def _assert_digest_loss_uses_evidence_slots(tmp_path: Path) -> None:
         pending = restored.pending_notification
         assert pending is not None and pending.get('disclosed_intervals') == []
         payload = cast(dict[str, str], json.loads(base64.b64decode(pending['payload_base64'])))
-        assert payload['subject'] == f'Origo daily digest {next_day.date().isoformat()}'
+        assert str(payload['subject']).startswith('Origo · Daily digest:')
         assert 'exceeded the 24-hour replay horizon' not in payload['text'] + payload['html']
     # A whole unsent minute beyond the retained boundary still creates a disclosure.
     late = watermark + timedelta(days=1, minutes=1, seconds=5)
@@ -549,7 +586,7 @@ def test_all_notifications_obey_global_hourly_budget(tmp_path: Path) -> None:
     pending = quiet.pending_notification
     assert pending is not None
     payload = cast(dict[str, str], json.loads(base64.b64decode(pending['payload_base64'])))
-    assert payload['subject'] == f'Origo daily digest {start.date().isoformat()}'
+    assert str(payload['subject']).startswith('Origo · Daily digest:')
     assert 'lifetime' not in payload['text'].lower()
 
 

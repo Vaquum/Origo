@@ -343,17 +343,23 @@ original detector key. C2/M2, UNKNOWN and evidence/tape/page faults remain unhel
 Grouping never changes these predicates, keys or holds. Reason changes can therefore
 reset held eligibility even within one stable operator incident.
 
-Dashboard and mail use `origo.observatory` for the same named laws, cards, status,
-measurements, copy and evidence coverage. HTML and plain text are the same ranked
-snapshot, with explicit omitted groups, observed/prepared times and incomplete history.
+Dashboard and mail use `origo.observatory` for the same recorded facts. The email
+opens with current affected sources and checks, delay, reader and file-publication
+limits, and the next Dagit investigation. Its compact current evidence is retained
+before historical incident detail is trimmed, within the existing 16 KiB summary.
+Healthy counts, publication currency, normal archive waits and recorded historical
+gaps follow. HTML and plain text carry the same brief, observed/prepared times,
+verification limits and omitted historical groups. The dashboard retains its cards.
 Each body is capped at 64 KiB. The optional `ORIGO_ALERT_DASHBOARD_URL` must be
 an operator-facing HTTP(S) `/law` URL without credentials or fragments; invalid configuration
 omits the link and explains why. The private health URL is never used as an email link.
 
 Conditions group by source/predicate or component identity, independently of reasons.
 Repeated minute observations increase counts without triggering mail. New eligible
-failures, verification changes, expected waits, confirmed recovery (two consecutive
-passes) and reopening trigger summaries. Missing/UNKNOWN evidence resets confirmation;
+condition failures, condition verification changes, confirmed recovery (two consecutive
+passes), reopening and a new recorded failure-event episode trigger summaries.
+Normal waits and historical-event verification changes remain visible in the daily
+digest; they do not trigger another email. Historical quiet never proves recovery. Missing/UNKNOWN evidence resets confirmation;
 one passing sample is recovery pending. Event streams retain historical failures,
 become historical after 60 minutes and do not claim resolution from a quiet read.
 An event episode restarts only after 24 hours of fully observed quiet. Trend comparisons

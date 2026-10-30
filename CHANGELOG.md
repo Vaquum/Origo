@@ -1,3 +1,9 @@
+# v3.34.58
+
+- Replace law-monitor status dumps with the approved current-failure brief, separate reader and file limits, normal archive waits and concise HTML/text evidence.
+- Keep incomplete historical-event verification out of repeated alerts while preserving current-condition notifications, retries and the hourly dispatch budget.
+- Retain live collectors and feed workers during this monitor release through the existing native-jobs deployment pin.
+
 # v3.34.57
 
 - Retain only the current local Hugging Face export after publication, retry or failure; reclaim superseded exports under the existing consumer lock.

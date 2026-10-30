@@ -100,6 +100,8 @@ class OperatorSummary(TypedDict):
     prepared_at: NotRequired[str]
     law_observed: NotRequired[bool]
     law_sample_ref: NotRequired[str | None]
+    current_evidence: NotRequired[Document]
+    digest: NotRequired[bool]
 
 
 class NotificationObservation(TypedDict):
@@ -311,6 +313,13 @@ def _publication_status(observation: Document) -> SummaryStatus:
     if policy.get('reason') == 'not_applicable':
         return 'FAIL' if observation.get('status') == 'STALE' and observation.get('reason') != 'publication_state_changed' else 'EXPECTED_WAIT'
     return 'UNKNOWN'
+
+
+evidence_object = _object
+evidence_objects = _objects
+evidence_number = _number
+publication_status = _publication_status
+summary_status = _status
 
 
 def _card(key: str, label: str, value: str, status: SummaryStatus, explanation: str,
@@ -685,6 +694,57 @@ def _incident(key: str, episode: _Episode, frames: Sequence[ObservationFrame], n
             'transitions': [f"{item['description']} at {item['sampling_slot']}" for item in episode.transitions]}
 
 
+def _current_evidence(current: Document, catalog: Document, frames: Sequence[ObservationFrame]) -> Document:
+    report = _object(current.get('last_report'))
+    names = {str(source.get('id')): source.get('name') for source in _objects(catalog.get('sources'))}
+    fields = ('reader_end', 'age_seconds', 'budget_seconds', 'day', 'hour', 'deadline',
+              'canonical_interval', 'first_invalid_day', 'first_invalid_hour', 'missing_seconds',
+              'missing_hours', 'missing_days', 'missing_slots', 'expected_slots',
+              'first_gap_hour', 'first_missing_second')
+    sources: list[Json] = []
+    for feed in _objects(report.get('feeds')):
+        predicates: Document = {}
+        for family, value in _object(feed.get('predicates')).items():
+            result = _object(value)
+            evidence = _object(result.get('evidence'))
+            predicates[family] = {'status': result.get('status')}
+            if result.get('status') != 'PASS':
+                predicates[family] = {'status': result.get('status'), 'reason': result.get('reason'),
+                                      **{key: evidence[key] for key in fields if key in evidence}}
+            elif evidence.get('missing_seconds'):
+                predicates[family] = {'status': result.get('status'), **{
+                    key: evidence[key] for key in ('missing_seconds', 'first_gap_hour', 'first_missing_second') if key in evidence}}
+        sources.append({'id': feed.get('source_key'), 'name': names.get(str(feed.get('source_key'))),
+                        'predicates': predicates})
+    outputs: list[Json] = []
+    for output in _objects(report.get('projections')):
+        if ':consumer:' in str(output.get('id')):
+            policy = _object(output.get('publication_policy'))
+            item: Document = {'id': output.get('id'), 'status': output.get('status'),
+                              'reason': output.get('reason'), 'publication_policy': {'reason': policy.get('reason')}}
+            if _publication_status(output) != 'PASS':
+                item['data_through'] = output.get('data_through')
+                item['publication_policy'] = {key: policy[key] for key in ('reason', 'grace_seconds', 'lag_seconds') if key in policy}
+            outputs.append(item)
+    conditions: list[Json] = []
+    if frames and frames[-1]['sampling_slot'] == report.get('sampling_slot'):
+        conditions = [{'id': item['group_id'], 'status': item['status'], 'check': item['check'],
+                       'scope': item['scope'], 'keys': list(item['detector_keys'])}
+                      for item in frames[-1]['observations']
+                      if item['kind'] == 'condition' and item['status'] in ('FAIL', 'UNKNOWN')
+                      and not item['group_id'].startswith(('law.', 'law:', 'publication:'))]
+    gates = [*_objects(report.get('gates')), *_objects(current.get('operational_gates'))]
+    events: list[Json] = []
+    if frames:
+        events = [{'scope': item['scope'], 'check': item['check']}
+                  for item in frames[-1]['observations']
+                  if item['kind'] == 'event_stream' and item['status'] == 'FAIL']
+    return {'sources': sources, 'outputs': outputs, 'conditions': conditions, 'events': events,
+            'operations': {str(gate['gate_id']): {'status': gate.get('outcome'), 'evidence': gate.get('evidence')}
+                           for gate in gates if str(gate.get('gate_id')).startswith('monitor.')},
+            'previous': current.get('previous_email'), 'reason': current.get('reason')}
+
+
 def build_summary(current: Document, catalog: Document, history: Sequence[ObservationFrame], *, now: datetime) -> OperatorSummary:
     frames, episodes = _reduce(history, now)
     coverage = _history_coverage(frames, now)
@@ -707,7 +767,8 @@ def build_summary(current: Document, catalog: Document, history: Sequence[Observ
         'status': status, 'cards': cards, 'incidents': incidents, 'coverage': coverage,
         'omitted_groups': omitted, 'delivery_status': str(current.get('delivery_status') or 'Not recorded'),
         'law_observed': bool(report),
-        'law_sample_ref': frames[-1]['law_sample_ref'] if frames else None}
+        'law_sample_ref': frames[-1]['law_sample_ref'] if frames else None,
+        'current_evidence': _current_evidence(effective, catalog, frames)}
     for incident in incidents:
         incident['display_lines'] = incident_lines(incident, 4)
     # Detail yields before identity rows; any truncation remains explicit.

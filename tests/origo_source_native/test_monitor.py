@@ -266,8 +266,9 @@ def test_monitor_reports_run_failures_once_and_suppresses_repeats_within_cooldow
         assert len([key for key in first.failed if key.startswith('run_failure:')]) == len(expected)
         email = _emails(recorder)[-1]
         summary = json.loads((folder / 'law/operator-summary.json').read_text())
-        assert all(row['label'] in email['text'] for row in summary['incidents'])
-        assert 'Omitted recorded groups:' in email['text'] and '<html>' in email['html']
+        assert all(key.replace('_', ' ') in email['text'] for key in expected)
+        assert summary['current_evidence'] and 'Failure event recorded' in email['text']
+        assert 'Operator summary · snapshot' not in email['text'] and '<html' in email['html']
         assert all(post['passed'] is False for post in _check_posts(recorder) if post['check_name'] == 'queue_bounded')
         elapsed[0] += 60
         second = monitor.tick(NOW + timedelta(minutes=1))
@@ -302,10 +303,14 @@ def test_monitor_reports_failed_checks_and_queue_backlog(recorder: _Recorder, tm
         for check in node['assetChecksOrError'].get('checks', [])
     }
     assert declared
-    monitor = _monitor(recorder, tmp_path)
+    monitor = _monitor(recorder, tmp_path, settings=_settings(recorder, public_dashboard_url='https://origo.vaquum.fi/law'))
     outcome = monitor.tick(NOW)
     assert 'queue_backlog' in outcome.failed
     assert declared <= set(outcome.failed)
+    email = _emails(recorder)[-1]
+    for fact in ('Run queue', f'{health["data"]["queued"]["count"]} runs are queued.',
+                 f'Queue limit {monitor.queue_threshold} runs', 'Check queued runs in Dagit.', 'overview=queue'):
+        assert fact in email['text'] and fact in email['html']
     # The same evaluation is behind the cursor on the next tick, so it is not found again.
     again = monitor.tick(NOW + timedelta(minutes=1))
     assert 'queue_backlog' in again.failed
@@ -338,7 +343,7 @@ def test_dagit_unreachable_is_itself_a_finding(recorder: _Recorder, tmp_path: Pa
     # The other sources are still evaluated in the same tick and every check is written.
     assert 'heartbeat_stale:market_state_api' in outcome.failed
     assert {post['check_name'] for post in _check_posts(recorder)} == set(MONITOR_CHECK_NAMES)
-    assert 'dagster_unreachable' in _emails(recorder)[0]['text']
+    assert 'Dagit is unreachable' in _emails(recorder)[0]['text']
     # The failure cursor did not move while Dagit was down: the same cursor file, a
     # reachable Dagit, and every fixture failure is reported.
     recovered = _monitor(recorder, tmp_path).tick(NOW + timedelta(minutes=1))
@@ -376,8 +381,8 @@ def test_monitor_flags_stale_heartbeats_and_failed_receipts(
         assert 'receipt_failed:depth:depth200_snapshots' not in outcome.failed
         alive = [post for post in _check_posts(recorder) if post['check_name'] == 'workers_alive']
         assert alive and alive[0]['passed'] is False
-        assert 'Worker heartbeats' in _emails(recorder)[0]['text']
-        assert 'Omitted recorded groups:' in _emails(recorder)[0]['text']
+        assert 'Worker heartbeat is missing or stale' in _emails(recorder)[0]['text']
+        assert 'Detail omitted:' in _emails(recorder)[0]['text']
         assert 'receipt_failed:depth:depth20_snapshots' in alive[0]['metadata']['keys']
     finally:
         client.disconnect()
@@ -509,7 +514,8 @@ def test_monitor_alerts_on_error_rows_in_container_log(
         }
         logs = [post for post in _check_posts(recorder) if post['check_name'] == 'no_error_logs']
         assert logs[0]['passed'] is False and logs[0]['metadata']['findings'] == 2
-        assert 'Error lines' in _emails(recorder)[0]['text']
+        assert 'error logs:dagster' in _emails(recorder)[0]['text']
+        assert 'error logs:clickhouse' in _emails(recorder)[0]['text']
         assert 'error_logs:dagster' in logs[0]['metadata']['keys']
         assert 'error_logs:clickhouse' in logs[0]['metadata']['keys']
     finally:
@@ -531,14 +537,13 @@ def test_monitor_writes_checks_to_dagit_before_sending_one_email(
     email = _emails(recorder)[0]
     assert email['_authorization'] == 'Bearer test-key'
     assert email['to'] == ['operator@example.test']
-    assert 'Dagit checks recorded.' in email['text']
-    assert all(title in email['text'] and html.escape(title) in email['html']
-               for family, title in LAW_NAMES.items() if family != 'D1')
+    assert 'Checks recorded in Dagit.' in email['text']
+    assert 'Current checks' in email['text']
     assert LAW_NAMES['D1'] not in email['text']
     assert email['_idempotency_key']
     recorded_keys = ', '.join(post['metadata']['keys'] for post in checks)
     assert all(key in recorded_keys for key in outcome.failed)
-    assert 'Omitted recorded groups:' in email['text']
+    assert 'Operator summary · snapshot' not in email['text']
 
     # A Dagit that refuses the write is reported in the same e-mail.
     second = _monitor(recorder, tmp_path / 'refused', dagster_url=_url(recorder))
@@ -559,20 +564,20 @@ def test_daily_digest_is_sent_once_at_the_configured_hour(
     monitor.tick(NOW)
     elapsed[0] = 60
     monitor.tick(NOW + timedelta(minutes=1))
-    digests = [email for email in _emails(recorder) if 'daily digest' in email['subject']]
+    digests = _emails(recorder)
     assert len(digests) == 1
-    assert digests[0]['subject'] == f'Origo daily digest {NOW.date().isoformat()}'
+    assert Cursor.load(monitor.cursor_path, NOW, 60).last_digest_date == NOW.date().isoformat()
     assert 'ticks:' not in digests[0]['text'] and 'findings:' not in digests[0]['text']
-    assert '1,440 samples' in digests[0]['text'] and 'incomplete' in digests[0]['text']
+    assert 'History incomplete.' in digests[0]['text']
     elapsed[0] = 86400
     monitor.tick(NOW + timedelta(days=1))
-    assert len([email for email in _emails(recorder) if 'daily digest' in email['subject']]) == 2
+    assert len(_emails(recorder)) == 2
     catchup = _monitor(recorder, tmp_path / 'catchup', settings=_settings(recorder, digest_hour_utc=7))
     catchup.tick(NOW + timedelta(days=1, hours=1))
-    assert _emails(recorder)[-1]['subject'] == f'Origo daily digest {(NOW + timedelta(days=1)).date().isoformat()}'
+    assert Cursor.load(catchup.cursor_path, NOW + timedelta(days=1, hours=1), 60).last_digest_date == (NOW + timedelta(days=1)).date().isoformat()
     quiet = _monitor(recorder, tmp_path / 'quiet', settings=_settings(recorder, digest_hour_utc=NOW.hour + 1))
     quiet.tick(NOW)
-    assert len([email for email in _emails(recorder) if 'daily digest' in email['subject']]) == 3
+    assert Cursor.load(quiet.cursor_path, NOW, 60).last_digest_date == ''
 
 
 def test_send_alert_posts_to_resend(recorder: _Recorder) -> None:
@@ -719,7 +724,7 @@ def test_a_failing_detector_is_a_finding_and_the_tick_still_reports(
     assert {post['check_name']: post['passed'] for post in checks}['workers_alive'] is False
     assert {post['check_name']: post['passed'] for post in checks}['no_error_logs'] is False
     email = _emails(recorder)[0]
-    assert 'History is incomplete' in email['text']
+    assert 'History incomplete.' in email['text']
     assert 'detector_failed:workers' in next(post for post in checks if post['check_name'] == 'workers_alive')['metadata']['keys']
     frame = monitor.notification_history.observations()[-1]
     assert any(row['group_id'] == 'detector_failed:workers' and row['status'] == 'UNKNOWN' for row in frame['observations'])
@@ -970,9 +975,9 @@ def test_law_tape_precedes_unheld_dagit_and_held_mail(
     assert len(json.dumps(report, separators=(',', ':')).encode()) < 64 * 1024
     assert _check_posts(recorder)[checked.index('data_current')]['passed'] is False
     email = _emails(recorder)[0]
-    assert 'Live source data is fresh' in email['text']
+    assert 'Current checks' in email['text']
     assert 'Depth minutes are complete' not in email['text']
-    assert 'Evidence: samples-' in email['text']
+    assert 'Next:' in email['text'] and 'Dagit' in email['text']
 
 
 def test_data_current_hold_uses_consecutive_slots_and_cooldown(tmp_path: Path) -> None:
@@ -1187,8 +1192,8 @@ def test_law_tape_failure_keeps_other_checks_and_delivery_running(
     outcome = monitor.tick(NOW)
     assert 'detector_failed:law' in outcome.failed
     assert set(post['check_name'] for post in _check_posts(recorder)) == set(MONITOR_CHECK_NAMES)
-    assert 'History is incomplete' in _emails(recorder)[0]['text']
-    assert 'Data laws: ◌ unknown' in _emails(recorder)[0]['text']
+    assert 'History incomplete.' in _emails(recorder)[0]['text']
+    assert 'Current status cannot be verified' in _emails(recorder)[0]['text']
     assert any('detector_failed:law' in post['metadata'].get('keys', '') for post in _check_posts(recorder))
     assert _failure_keys() <= set(outcome.failed)
 
@@ -1286,7 +1291,7 @@ def test_law_page_probe_is_bounded_and_uses_existing_alert_path(
     outcome = monitor.tick(NOW)
     assert time.monotonic() - started < 5
     assert 'law_page_unreachable' in outcome.failed
-    assert 'law_page_unreachable' in _emails(recorder)[0]['text']
+    assert 'law page unreachable' in _emails(recorder)[0]['text']
     report = monitor.law_tape.last
     assert report is not None
     event = next(event for event in report['gates'] if event['gate_id'] == 'monitor.data_current')
@@ -1889,9 +1894,12 @@ def test_notification_storage_failure_bounds_large_recorded_frame_before_fallbac
     from .test_alert_summary import CAPTURES, _document, _monitor_with_recorded_reads, _now
 
     calls: list[str] = []
-    monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, calls)
-    now = _now()
-    report = page._object(_document(CAPTURES / 'current.json')['last_report'])
+    monitor = _monitor_with_recorded_reads(tmp_path, monkeypatch, calls, capture_name='current-0608.json')
+    captured = _document(CAPTURES / 'current-0608.json')
+    now = datetime.fromisoformat(str(captured['checked_at'])) + timedelta(seconds=1)
+    report = page._object(captured['last_report'])
+    assert monitor.settings is not None
+    monitor.settings = replace(monitor.settings, digest_hour_utc=0)
     original_frame = monitor._observation_frame
     captured_frames: list[ObservationFrame] = []
 
@@ -1925,7 +1933,12 @@ def test_notification_storage_failure_bounds_large_recorded_frame_before_fallbac
             assert len(frame['observations']) > 64
             raise OSError('injected failure before sidecar truncation')
         monkeypatch.setattr(monitor.notification_history, 'append', failed_append)
-    monkeypatch.setattr('origo.alerts.summary.send_alert', lambda *args, **kwargs: 'local-provider-ack')
+    sent: list[Document] = []
+    def acknowledge(payload: bytes, *, api_key: str, api_url: str, idempotency_key: str) -> str:
+        assert api_key and api_url and idempotency_key
+        sent.append(cast(Document, json.loads(payload)))
+        return 'local-provider-ack'
+    monkeypatch.setattr('origo.alerts.summary.send_alert', acknowledge)
     outcome = monitor.tick(now)
     assert outcome.processed == tuple(MONITOR_CHECK_NAMES)
     assert calls.count('dagit') == len(MONITOR_CHECK_NAMES)
@@ -1937,6 +1950,14 @@ def test_notification_storage_failure_bounds_large_recorded_frame_before_fallbac
     decoded, _ = monitor.notification_history.decode(retained)
     assert len(decoded['observations']) <= 64 and not decoded['complete']
     assert len(json.dumps(decoded, separators=(',', ':')).encode()) <= 128 * 1024
+    failed_sources = {str(feed['source_key']) for feed in page._objects(report['feeds'])
+                      if any(page._object(value).get('status') == 'FAIL' for value in page._object(feed['predicates']).values())}
+    assert failed_sources and len(sent) == 1
+    persisted = _document(monitor.law_tape.root / 'operator-summary.json')
+    assert len(json.dumps(persisted, separators=(',', ':')).encode()) <= 16 * 1024
+    for source in failed_sources:
+        assert f'data-source="{source}"' in str(sent[0]['html'])
+        assert f'source={source}' in str(sent[0]['text'])
     restored = Cursor.load(monitor.cursor_path, now, 15)
     assert restored.failures_after == now.timestamp()
     assert restored.receipts_after == restored.logs_after == (now - timedelta(seconds=DELIVERY_LAG_SECONDS)).isoformat()

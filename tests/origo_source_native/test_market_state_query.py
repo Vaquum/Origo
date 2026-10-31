@@ -759,7 +759,8 @@ def test_query_runs_with_declared_clickhouse_settings(cube: SourceRuntime, tmp_p
         assert effective(settings, defaults, 'max_memory_usage') == str(4 * 1024**3)
         # Nothing spills: neither the absolute triggers nor 26.8's default ratio triggers are on.
         for trigger in ('max_bytes_before_external_group_by', 'max_bytes_before_external_sort',
-                        'max_bytes_ratio_before_external_group_by', 'max_bytes_ratio_before_external_sort'):
+                        'max_bytes_before_external_join', 'max_bytes_ratio_before_external_group_by',
+                        'max_bytes_ratio_before_external_sort', 'max_bytes_ratio_before_external_join'):
             assert effective(settings, defaults, trigger) == '0', trigger
         assert effective(settings, defaults, 'max_execution_time') == '60'
         assert effective(settings, defaults, 'timeout_overflow_mode') == 'throw'

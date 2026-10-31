@@ -28,7 +28,7 @@ DIAGNOSTIC_LOGS = (
     'part_log',
     'metric_log',
     'asynchronous_metric_log',
-    'latency_log',
+    'background_schedule_pool_log',
     'query_metric_log',
     'error_log',
     'query_thread_log',
@@ -41,7 +41,7 @@ DIAGNOSTIC_LOGS = (
     'backup_log',
 )
 # Logs the server no longer writes: their tables stay until every part is past retention.
-RETIRED_LOGS = ('processors_profile_log',)
+RETIRED_LOGS = ('processors_profile_log', 'latency_log')
 RETIRED_TABLE_GRACE_DAYS = 15
 
 
@@ -113,7 +113,7 @@ def maintain_diagnostics(
     client: Client, config: OperationalMetadataMaintenanceConfig, deadline: float
 ) -> DiagnosticInventory:
     version = _execute(client, 'SELECT version()', deadline)
-    if version != [('25.3.2.39',)]:
+    if version != [('26.8.36.3',)]:
         raise RuntimeError(f'Diagnostic retention has not been validated on {version}.')
     # Materialize configured but unused logs before checking policy coverage.
     _execute(client, 'SYSTEM FLUSH LOGS', deadline)

@@ -1,6 +1,6 @@
 services:
   clickhouse:
-    image: clickhouse/clickhouse-server:25.3.2.39@sha256:8745843b17f92db1765025009772ec1d87dfdcaa95deabca6b802a66cb669d30
+    image: clickhouse/clickhouse-server:26.8.36.3@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
     ports:
       - "8123:8123"
       - "9000:9000"
@@ -140,11 +140,11 @@ services:
     restart: unless-stopped
 
   vector:
-    image: timberio/vector:0.58.0-alpine
+    image: timberio/vector:0.61.0-alpine
     environment:
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
       - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
-      # Vector 0.58 leaves ${...} references in its configuration literal unless told to
+      # Vector 0.61 leaves ${...} references in its configuration literal unless told to
       # interpolate them; the configuration is a read-only mount in a container that runs
       # nothing else.
       - VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION=true

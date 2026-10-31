@@ -2,6 +2,10 @@
   <profiles>
     <default>
       <log_processors_profiles>0</log_processors_profiles>
+      <!-- ClickHouse 26.3 turned async inserts on and 26.8 parallelized INSERT SELECT by default.
+           Ingestion keeps the synchronous single-threaded inserts it was measured with. -->
+      <async_insert>0</async_insert>
+      <max_insert_threads>1</max_insert_threads>
     </default>
     <law_reader>
       <readonly>1</readonly>

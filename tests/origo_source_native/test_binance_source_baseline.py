@@ -76,12 +76,12 @@ def _assets() -> dict[str, AssetsDefinition]:
 
 
 def test_clickhouse_runtime_matches_deployment(clickhouse_settings: dict[str, str]) -> None:
-    pinned = 'clickhouse/clickhouse-server:25.3.2.39@sha256:8745843b17f92db1765025009772ec1d87dfdcaa95deabca6b802a66cb669d30'
+    pinned = 'clickhouse/clickhouse-server:26.8.36.3@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7'
     assert CLICKHOUSE_DOCKERFILE.read_text().splitlines()[0] == f'FROM {pinned}'
     client = _make_admin_client(clickhouse_settings)
     try:
         version, container = client.execute('SELECT version(), hostName()')[0]
-        assert version == '25.3.2.39'
+        assert version == '26.8.36.3'
         metadata = json.loads(_docker('inspect', str(container)))[0]
         assert metadata['Name'].startswith('/origo-tests-')
         # BuildKit's cache need not expose the base image to docker image inspect.

@@ -127,7 +127,7 @@ def test_clickhouse_runtime_matches_deployment(clickhouse_settings: dict[str, st
         }
         actual = dict(client.execute('SELECT name, value FROM system.settings'))
         assert {name: actual[name] for name in expected} == expected
-        assert str(actual['max_threads']).startswith("'auto(")
+        assert str(actual['max_threads']).startswith('auto(')
         client.execute('SYSTEM FLUSH LOGS')
         stored, verbose = client.execute(
             "SELECT count(), countIf(level > 'Information') FROM system.text_log"

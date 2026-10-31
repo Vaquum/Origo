@@ -29,7 +29,7 @@ COLUMNS = (
 
 def spot_table(body: bytes, partition: Partition) -> ArrowTable:
     frame = pl.read_csv(
-        io.BytesIO(body), has_header=False, schema={c: pl.String for c in COLUMNS}, n_threads=2
+        io.BytesIO(body), has_header=False, schema={c: pl.String for c in COLUMNS}
     )
     if not frame.height or frame.null_count().sum_horizontal().item():
         raise ValueError('Spot archive must contain non-empty complete rows.')

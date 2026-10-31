@@ -28,7 +28,7 @@ HEADER = 'agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time
 
 def agg_table(body: bytes, partition: Partition) -> ArrowTable:
     frame = pl.read_csv(
-        io.BytesIO(body), has_header=False, schema={c: pl.String for c in COLUMNS}, n_threads=2
+        io.BytesIO(body), has_header=False, schema={c: pl.String for c in COLUMNS}
     )
     if frame.height and frame.row(0) == tuple(HEADER.split(',')):
         frame = frame.slice(1)

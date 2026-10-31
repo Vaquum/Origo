@@ -27,7 +27,7 @@ HEADER = 'id,price,qty,quote_qty,time,is_buyer_maker'
 
 def perp_table(body: bytes, partition: Partition) -> ArrowTable:
     frame = pl.read_csv(
-        io.BytesIO(body), has_header=False, schema={c: pl.String for c in COLUMNS}, n_threads=2
+        io.BytesIO(body), has_header=False, schema={c: pl.String for c in COLUMNS}
     )
     if frame.row(0) == tuple(HEADER.split(',')):
         frame = frame.slice(1)

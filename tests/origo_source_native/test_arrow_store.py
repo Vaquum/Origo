@@ -227,7 +227,7 @@ def test_large_series_publishes_single_record_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Far past polars' default ~122k-row IPC batch size: a naive write_ipc splits into
-    # several record batches that a reader exposes as multiple chunks,
+    # several record batches that ``pl.read_ipc`` keeps as separate chunks,
     # which breaks the zero-copy ts view. stage_series' record_batch_size forces one
     # batch. (The small-frame tests above never crossed the threshold, so they missed
     # this -- it surfaced only in production on million-row series.)

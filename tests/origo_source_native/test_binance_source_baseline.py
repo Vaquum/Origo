@@ -123,6 +123,8 @@ def test_clickhouse_runtime_matches_deployment(clickhouse_settings: dict[str, st
             'enable_optimize_predicate_expression': '1',
             'allow_experimental_analyzer': '1',
             'async_insert': '0',
+            'max_insert_threads': '1',
+            'output_format_json_quote_64bit_integers': '1',
             'log_processors_profiles': '0',
         }
         actual = dict(client.execute('SELECT name, value FROM system.settings'))

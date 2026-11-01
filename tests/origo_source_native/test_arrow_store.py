@@ -185,7 +185,7 @@ def test_store_values_are_bit_identical_to_parquet(
     _write_month(tmp_path / "parquet", spec, source, 2024, 1)
 
     publish_series("time_1m", build_series_frame(spec, tmp_path / "parquet"))
-    stored = pl.read_ipc(series_store_dir("time_1m") / LATEST_NAME, memory_map=True, rechunk=False)
+    stored = pl.read_ipc(series_store_dir("time_1m") / LATEST_NAME)
 
     # Every measure column survives at the exact same dtype and bits as the mirror
     # (no downcast) -- the store must not diverge from the rest of the system.
@@ -215,7 +215,7 @@ def test_publish_series_writes_mmap_ready_arrow(
     assert latest.is_symlink()
 
     # Acceptance: one record batch, zero-copy int64 ts view, strictly increasing.
-    frame = pl.read_ipc(latest, memory_map=True, rechunk=False)
+    frame = pl.read_ipc(latest)
     assert frame.n_chunks() == 1
     ts = frame["ts"].to_numpy(allow_copy=False)
     assert ts.dtype == "int64"
@@ -227,7 +227,7 @@ def test_large_series_publishes_single_record_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Far past polars' default ~122k-row IPC batch size: a naive write_ipc splits into
-    # several record batches that a memory_map=True reader exposes as multiple chunks,
+    # several record batches that ``pl.read_ipc`` keeps as separate chunks,
     # which breaks the zero-copy ts view. stage_series' record_batch_size forces one
     # batch. (The small-frame tests above never crossed the threshold, so they missed
     # this -- it surfaced only in production on million-row series.)
@@ -247,7 +247,7 @@ def test_large_series_publishes_single_record_batch(
     outcome = publish_series("time_1m", build_series_frame(spec, tmp_path / "parquet"))
     assert outcome.status == "published"
 
-    frame = pl.read_ipc(series_store_dir("time_1m") / LATEST_NAME, memory_map=True, rechunk=False)
+    frame = pl.read_ipc(series_store_dir("time_1m") / LATEST_NAME)
     assert frame.height == rows
     assert frame.n_chunks() == 1  # one record batch even well past the split threshold
     frame["ts"].to_numpy(allow_copy=False)  # zero-copy must succeed (raises if multi-chunk)
@@ -280,7 +280,7 @@ def test_atomic_swap_keeps_pre_open_handle_readable(
 
     # The pre-opened handle still reads v1; a fresh read sees v2; v1 is retained.
     assert handle.read_all().num_rows == 2
-    assert pl.read_ipc(latest, memory_map=True, rechunk=False).height == 3
+    assert pl.read_ipc(latest).height == 3
     assert version_one.exists()
     assert latest.resolve() != version_one
 
@@ -320,7 +320,7 @@ def test_monotonic_guard_skips_staler(tmp_path: Path, monkeypatch: pytest.Monkey
     assert staler.status == "skipped_not_newer"
 
     latest = series_store_dir("time_1m") / LATEST_NAME
-    assert pl.read_ipc(latest, memory_map=True, rechunk=False).height == 3
+    assert pl.read_ipc(latest).height == 3
 
 
 def test_retention_keeps_min_versions_and_respects_grace(

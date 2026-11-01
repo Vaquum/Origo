@@ -1,3 +1,7 @@
+# v3.34.60
+
+- Upgrade Polars from 1.44.2 to 2.1.0. Binance daily-archive parsing drops the two-thread CSV cap that Polars 2 removed; it is faster without using more CPU per archive. The Arrow store reads its newest `ts` without a memory map, which Polars 2 also removed.
+
 # v3.34.59
 
 - Upgrade ClickHouse from the unsupported 25.3.2.39 to 26.8.36.3 LTS and Vector from 0.58.0 to 0.61.0. Keep synchronous single-threaded inserts and quoted 64-bit JSON integers through the default profile, and retain `background_schedule_pool_log` in place of the removed `latency_log`.

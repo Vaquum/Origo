@@ -171,7 +171,7 @@ def _series_max_ts(frame: pl.DataFrame) -> int | None:
 
 
 def _existing_max_ts(path: Path) -> int | None:
-    frame = pl.read_ipc(path, columns=['ts'], memory_map=True)
+    frame = pl.read_ipc(path, columns=['ts'])
     return _series_max_ts(frame)
 
 
@@ -263,8 +263,8 @@ def stage_series(series: str, build: BarSeriesBuild) -> StagedSeries | None:
     try:
         with open(tmp, 'wb') as handle:
             # record_batch_size >= height forces a single record batch. Without it polars
-            # splits frames past its default (~122k rows) into multiple batches, which a
-            # ``memory_map=True`` reader surfaces as multiple chunks -- breaking the single
+            # splits frames past its default (~122k rows) into multiple batches, which
+            # ``pl.read_ipc`` keeps as separate chunks -- breaking the single
             # batch / zero-copy ``ts`` contract for every non-trivial series. The bytes
             # stream to disk instead of piling up beside the frame.
             df.write_ipc(handle, compression='uncompressed', record_batch_size=max(df.height, 1))

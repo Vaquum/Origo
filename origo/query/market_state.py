@@ -73,12 +73,15 @@ MAX_BODY_BYTES: Final = 65_536
 # statement spills to disk: one that outgrows its memory fails, so no temporary data can take
 # the disk that result admission keeps for source ingestion. ClickHouse 26.8 spills GROUP BY,
 # ORDER BY and hash joins at half the memory limit by default, so all three ratios are switched off.
+# clickhouse-connect asks ClickHouse to hold each answer until the statement ends. ClickHouse holds
+# it in a temporary file unless it fits the response buffer, which keeps small answers in memory.
 QUERY_SETTINGS: Final[Mapping[str, object]] = {
     'max_threads': 4,
     'max_memory_usage': 4 * 1024**3,
     'max_bytes_ratio_before_external_group_by': 0,
     'max_bytes_ratio_before_external_sort': 0,
     'max_bytes_ratio_before_external_join': 0,
+    'http_response_buffer_size': 1024**2,
     'max_execution_time': 60,
     'timeout_overflow_mode': 'throw',
     'max_block_size': BATCH_ROWS,

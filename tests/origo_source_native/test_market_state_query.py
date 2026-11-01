@@ -762,6 +762,8 @@ def test_query_runs_with_declared_clickhouse_settings(cube: SourceRuntime, tmp_p
                         'max_bytes_before_external_join', 'max_bytes_ratio_before_external_group_by',
                         'max_bytes_ratio_before_external_sort', 'max_bytes_ratio_before_external_join'):
             assert effective(settings, defaults, trigger) == '0', trigger
+        # Answers held until the statement ends stay in memory, not in a temporary file.
+        assert effective(settings, defaults, 'http_response_buffer_size') == str(1024**2)
         assert effective(settings, defaults, 'max_execution_time') == '60'
         assert effective(settings, defaults, 'timeout_overflow_mode') == 'throw'
         assert effective(settings, defaults, 'max_block_size') == '65536'

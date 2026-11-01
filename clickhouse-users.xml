@@ -2,6 +2,13 @@
   <profiles>
     <default>
       <log_processors_profiles>0</log_processors_profiles>
+      <!-- ClickHouse 26.3 turned async inserts on and 26.8 parallelized INSERT SELECT by default.
+           Ingestion keeps the synchronous single-threaded inserts it was measured with. -->
+      <async_insert>0</async_insert>
+      <max_insert_threads>1</max_insert_threads>
+      <!-- 26.x stopped quoting 64-bit integers in JSON output; JSON readers such as
+           field-data-api keep the quoted form they were built against. -->
+      <output_format_json_quote_64bit_integers>1</output_format_json_quote_64bit_integers>
     </default>
     <law_reader>
       <readonly>1</readonly>

@@ -1,3 +1,9 @@
+# v3.34.59
+
+- Upgrade ClickHouse from the unsupported 25.3.2.39 to 26.8.36.3 LTS and Vector from 0.58.0 to 0.61.0. Keep synchronous single-threaded inserts and quoted 64-bit JSON integers through the default profile, and retain `background_schedule_pool_log` in place of the removed `latency_log`.
+- Keep market-state statements free of temporary disk data on 26.8: switch off the new hash-join spill ratio and hold small HTTP answers in memory.
+- Expire the native-jobs deployment pin so this release takes the full rollout, which restarts ClickHouse on the new image.
+
 # v3.34.58
 
 - Replace law-monitor status dumps with the approved current-failure brief, separate reader and file limits, normal archive waits and concise HTML/text evidence.

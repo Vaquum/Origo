@@ -41,7 +41,6 @@
   <max_server_memory_usage>230000000000</max_server_memory_usage>
   <max_server_memory_usage_to_ram_ratio>0.9</max_server_memory_usage_to_ram_ratio>
 
-  <background_pool_task_schedule_size>128</background_pool_task_schedule_size>
   <background_merges_mutations_concurrency_ratio>2</background_merges_mutations_concurrency_ratio>
   <users>
     <default>
@@ -80,10 +79,10 @@
   <!-- Processor profiles are never written (log_processors_profiles=0); the log is retired
        and its remaining tables drain through the maintenance job. -->
   <processors_profile_log remove="1"/>
-  <latency_log>
+  <background_schedule_pool_log>
     <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
     <settings>merge_with_ttl_timeout=3600</settings>
-  </latency_log>
+  </background_schedule_pool_log>
   <query_metric_log>
     <ttl>event_time + INTERVAL 14 DAY DELETE</ttl>
     <settings>merge_with_ttl_timeout=3600</settings>

@@ -76,12 +76,12 @@ def _assets() -> dict[str, AssetsDefinition]:
 
 
 def test_clickhouse_runtime_matches_deployment(clickhouse_settings: dict[str, str]) -> None:
-    pinned = 'clickhouse/clickhouse-server:25.3.2.39@sha256:8745843b17f92db1765025009772ec1d87dfdcaa95deabca6b802a66cb669d30'
+    pinned = 'clickhouse/clickhouse-server:26.8.36.3@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7'
     assert CLICKHOUSE_DOCKERFILE.read_text().splitlines()[0] == f'FROM {pinned}'
     client = _make_admin_client(clickhouse_settings)
     try:
         version, container = client.execute('SELECT version(), hostName()')[0]
-        assert version == '25.3.2.39'
+        assert version == '26.8.36.3'
         metadata = json.loads(_docker('inspect', str(container)))[0]
         assert metadata['Name'].startswith('/origo-tests-')
         # BuildKit's cache need not expose the base image to docker image inspect.
@@ -123,11 +123,13 @@ def test_clickhouse_runtime_matches_deployment(clickhouse_settings: dict[str, st
             'enable_optimize_predicate_expression': '1',
             'allow_experimental_analyzer': '1',
             'async_insert': '0',
+            'max_insert_threads': '1',
+            'output_format_json_quote_64bit_integers': '1',
             'log_processors_profiles': '0',
         }
         actual = dict(client.execute('SELECT name, value FROM system.settings'))
         assert {name: actual[name] for name in expected} == expected
-        assert str(actual['max_threads']).startswith("'auto(")
+        assert str(actual['max_threads']).startswith('auto(')
         client.execute('SYSTEM FLUSH LOGS')
         stored, verbose = client.execute(
             "SELECT count(), countIf(level > 'Information') FROM system.text_log"

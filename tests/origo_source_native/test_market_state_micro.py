@@ -234,8 +234,10 @@ def test_micro_native_arithmetic_clocks_gaps_grouping_and_generation_fence(
             revision, build = 'captured-reaccepted', uuid4()
             for component in ('depth20',) if 'top20' in store.spec.key else ('raw', 'time'):
                 table = store.component_table(component)
+                # Qualified, because a bare name in WHERE resolves to the REPLACE alias on 26.8.
                 store.execute(f'''INSERT INTO {table} SELECT * REPLACE(%(revision)s AS revision, toUUID(%(build)s) AS build_id)
-                    FROM {table} WHERE partition_key=%(partition)s AND revision=%(old_revision)s AND build_id=%(old_build)s''',
+                    FROM {table} AS copied WHERE copied.partition_key=%(partition)s
+                    AND copied.revision=%(old_revision)s AND copied.build_id=%(old_build)s''',
                     {'revision': revision, 'build': str(build), 'partition': record.partition.key,
                      'old_revision': record.revision, 'old_build': record.build_id})
             store.insert_activation(replace(record, generation=record.generation + 1, revision=revision, build_id=build), 'micro-cache-control')

@@ -966,8 +966,8 @@ def test_processors_profile_log_is_retired_at_source(
 ) -> None:
     from origo.maintenance.clickhouse import DIAGNOSTIC_LOGS, RETIRED_LOGS, maintain_diagnostics
 
-    assert len(DIAGNOSTIC_LOGS) == 17 and 'processors_profile_log' not in DIAGNOSTIC_LOGS
-    assert RETIRED_LOGS == ('processors_profile_log',)
+    assert len(DIAGNOSTIC_LOGS) == 17 and not set(RETIRED_LOGS) & set(DIAGNOSTIC_LOGS)
+    assert RETIRED_LOGS == ('processors_profile_log', 'latency_log')
     client = _diagnostic_client(diagnostic_server)
     try:
         client.execute('SYSTEM FLUSH LOGS')
@@ -975,9 +975,9 @@ def test_processors_profile_log_is_retired_at_source(
             row[0]
             for row in client.execute("SELECT name FROM system.tables WHERE database='system'")
         }
-        assert 'processors_profile_log' not in tables
+        assert not set(RETIRED_LOGS) & tables
         report = maintain_diagnostics(client, POLICY, time.monotonic() + 30)
-        assert not any('processors_profile_log' in error for error in report.errors)
+        assert not any(log in error for error in report.errors for log in RETIRED_LOGS)
         assert report.retired == ()
     finally:
         client.disconnect()
